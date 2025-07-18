@@ -10,3 +10,4 @@ psutil
 torch
 tqdm
 gradio
+huggingface
