@@ -1,0 +1,12 @@
+datasets
+matplotlib
+seaborn
+pathlib
+numpy
+scikit-learn
+tabulate
+pandas
+psutil
+torch
+tqdm
+gradio
