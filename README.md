@@ -33,6 +33,11 @@ Tested on 1,000,000 pattern searches across 6.4M Wikipedia titles:
 
 ![Pattern Accuracy](src/images/pattern_accuracy_tejas.png)
 
+## 📖 Research Paper
+
+Read the full technical details and theoretical foundations in our paper:
+[**Tejas: Consciousness-Aligned Framework for Machine Intelligence**](paper/Tejas-white-paper.pdf)
+
 ## Technical Overview
 
 The system implements a consciousness-aligned encoding pipeline:
@@ -48,8 +53,8 @@ The system implements a consciousness-aligned encoding pipeline:
 
 ```bash
 # Clone repository
-git clone https://github.com/ReinforceAI/tejas.git
-cd tejas
+git clone https://github.com/yourusername/tejas-fingerprints.git
+cd tejas-fingerprints
 
 # Create virtual environment (Python 3.12)
 python3.12 -m venv venv
@@ -259,13 +264,16 @@ Post-normalization component distribution:
 If you use this code in your research, please cite:
 
 ```bibtex
-@software{tejas2025,
+@inproceedings{tejas2025,
   title={Tejas: Consciousness-Aligned Framework for Machine Intelligence},
   author={Deshwal, Viraj},
   year={2025},
-  url={https://github.com/ReinforceAI/tejas.git}
+  url={https://github.com/ReinforceAI/tejas},
+  note={Available at: \url{https://github.com/ReinforceAI/tejas/blob/main/paper/Tejas-white-paper.pdf}}
 }
 ```
+
+For the full paper, see: [paper/Tejas-white-paper.pdf](paper/Tejas-white-paper.pdf)
 
 ## Acknowledgments
 
