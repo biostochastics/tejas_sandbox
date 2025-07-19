@@ -53,8 +53,8 @@ The system implements a consciousness-aligned encoding pipeline:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/tejas-fingerprints.git
-cd tejas-fingerprints
+git https://github.com/ReinforceAI/tejas.git
+cd tejas
 
 # Create virtual environment (Python 3.12)
 python3.12 -m venv venv
@@ -273,19 +273,8 @@ If you use this code in your research, please cite:
 }
 ```
 
-For the full paper, see: [paper/Tejas-white-paper.pdf](paper/Tejas-white-paper.pdf)
 
 ## Acknowledgments
 
 We thank the Wikimedia Foundation for making Wikipedia data freely available for research. This work would not have been possible without their commitment to open knowledge.
 
-## License
-
-GNU General Public License v3.0 (GPL-3.0)
-
-This software is licensed under GPL-3.0, which means:
-- Anyone who distributes software based on this code must make their source code available
-- Commercial use is permitted, but the software must remain open source
-- Any modifications or derivative works must also be licensed under GPL-3.0
-
-See LICENSE file for full details.
