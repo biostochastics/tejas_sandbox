@@ -8,7 +8,7 @@ A quantum-inspired semantic search framework that encodes text into binary finge
 
 | Metric | Tejas | BERT | Elasticsearch | PostgreSQL |
 |--------|-------|------|---------------|------------|
-| Search Speed | 1.2 ms | 8.3 ms | 23 ms | 156 ms |
+| Encoding Speed | 1.2 ms | 8.3 ms | 23 ms | 156 ms |
 | Memory Usage | 782 MB | 19.7 GB | 15.4 GB | 2.1 GB |
 | Memory/Item | 16 bytes | 3,224 bytes | 2,520 bytes | 344 bytes |
 | Comparisons/sec | 5.4M | 120K | 43K | 6.4K |
