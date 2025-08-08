@@ -1,4 +1,4 @@
-# Tejas: Consciousness-Aligned Framework for Machine Intelligence
+# Tejas: Quantum-Physics Inspired Framework For Machine Intelligence
 
 A quantum-inspired semantic search framework that encodes text into binary fingerprints, achieving 5000x faster search than BERT with 97x memory reduction.
 
