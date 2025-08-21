@@ -54,35 +54,45 @@ class WorkflowTestSuite:
         return temp_path
     
     def _generate_workflow_test_data(self) -> Dict[str, Any]:
-        """Generate test data for workflow validation."""
+        """Generate realistic test data for workflow validation."""
         np.random.seed(42)
         
-        # Training data
+        # Training data - more realistic sizes
         training_titles = []
         
-        # Add structured patterns
+        # Add structured patterns with realistic variety
         patterns = {
             'University': [f'University of {city}' for city in 
-                          ['California', 'Oxford', 'Cambridge', 'Tokyo', 'Sydney']],
+                          ['California', 'Oxford', 'Cambridge', 'Tokyo', 'Sydney',
+                           'Melbourne', 'Toronto', 'Berlin', 'Paris', 'Rome']],
             'List': [f'List of {topic}' for topic in 
-                    ['countries', 'animals', 'colors', 'languages', 'sports']],
+                    ['countries', 'animals', 'colors', 'languages', 'sports',
+                     'cities', 'rivers', 'mountains', 'islands', 'books']],
             'History': [f'History of {subject}' for subject in 
-                       ['science', 'art', 'music', 'literature', 'philosophy']]
+                       ['science', 'art', 'music', 'literature', 'philosophy',
+                        'mathematics', 'physics', 'chemistry', 'biology', 'medicine']]
         }
         
         for pattern_titles in patterns.values():
             training_titles.extend(pattern_titles)
         
-        # Add random titles
-        training_titles.extend([f'Random Article {i}' for i in range(50)])
+        # Add more realistic random titles (1000 instead of 50)
+        training_titles.extend([f'Article_{category}_{i}' 
+                               for category in ['Science', 'Tech', 'Arts', 'History', 'Bio']
+                               for i in range(200)])
         
-        # Demo/query data
+        # Demo/query data - more realistic queries
         demo_queries = [
             'University of Stanford',  # Should match university pattern
             'List of movies',          # Should match list pattern  
             'History of computers',    # Should match history pattern
             'quantum physics',         # General search
-            'artificial intelligence'  # General search
+            'artificial intelligence', # General search
+            'machine learning basics', # Technical query
+            'climate change effects',  # Current topic
+            'COVID-19 pandemic',       # Recent event
+            'blockchain technology',   # Emerging tech
+            'renewable energy sources' # Environmental topic
         ]
         
         # Calibration data - create relevance judgments
@@ -161,7 +171,7 @@ class TestEndToEndWorkflows:
         temp_path = Path(workflow_suite.temp_dir)
         
         # Step 1: Direct training test (simulating CLI training)
-        encoder = GoldenRatioEncoder(n_bits=256, max_features=5000, threshold_strategy='median')
+        encoder = GoldenRatioEncoder(n_bits=256, max_features=5000)
         
         # Train encoder
         training_titles = workflow_suite.test_data['training_titles']
@@ -210,7 +220,7 @@ class TestEndToEndWorkflows:
         print("\n🎬 Testing demo workflow...")
         
         # Setup training
-        encoder = GoldenRatioEncoder(n_bits=256, max_features=5000, threshold_strategy='median')
+        encoder = GoldenRatioEncoder(n_bits=256, max_features=5000)
         training_titles = workflow_suite.test_data['training_titles']
         encoder.fit(training_titles)
         fingerprints = encoder.encode(training_titles)

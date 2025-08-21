@@ -30,7 +30,7 @@ class TestDriftMonitor:
         """Generate stable baseline fingerprint data."""
         np.random.seed(42)
         
-        n_samples = 1000
+        n_samples = 5000  # Increased for realistic statistical power
         n_bits = 1024
         
         # Generate fingerprints with consistent bit activation rates
@@ -44,7 +44,7 @@ class TestDriftMonitor:
         """Generate data with gradual distribution drift."""
         np.random.seed(42)
         
-        n_samples = 500
+        n_samples = 2500  # Increased for better drift detection
         n_bits = 1024
         
         batches = []
@@ -66,7 +66,7 @@ class TestDriftMonitor:
         """Generate data with sudden distribution shift."""
         np.random.seed(42)
         
-        n_samples = 500
+        n_samples = 2500  # Increased for better drift detection
         n_bits = 1024
         
         # First 3 batches stable, then sudden shift
@@ -110,7 +110,7 @@ class TestDriftMonitor:
         """Generate data with drift in specific bit positions."""
         np.random.seed(42)
         
-        n_samples = 500
+        n_samples = 2500  # Increased for better drift detection
         n_bits = 1024
         
         batches = []

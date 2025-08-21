@@ -29,6 +29,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class TejasError(Exception):
+    """Base exception for Tejas framework."""
+    pass
+
+class DataError(TejasError):
+    """Exception for data-related errors."""
+    pass
+
+class ModelError(TejasError):
+    """Exception for model-related errors."""
+    pass
+
+class ConfigError(TejasError):
+    """Exception for configuration errors."""
+    pass
+
+def handle_error(error, logger, exit_code=1):
+    """Centralized error handling with logging."""
+    error_type = type(error).__name__
+    error_msg = str(error)
+    
+    if isinstance(error, TejasError):
+        logger.error(f"{error_type}: {error_msg}")
+    elif isinstance(error, FileNotFoundError):
+        logger.error(f"File not found: {error_msg}")
+    elif isinstance(error, MemoryError):
+        logger.error(f"Out of memory: {error_msg}. Try reducing batch size or memory limit.")
+    elif isinstance(error, KeyboardInterrupt):
+        logger.info("Operation cancelled by user")
+        exit_code = 0
+    else:
+        logger.error(f"Unexpected error: {error_type}: {error_msg}")
+        logger.debug(traceback.format_exc())
+    
+    sys.exit(exit_code)
+
 def main():
     parser = argparse.ArgumentParser(
         description="Tejas: Quantum Semantic Fingerprint Framework",
@@ -151,6 +187,23 @@ Examples:
         type=int,
         default=None,
         help='Maximum titles to use (for testing, default: use all)'
+    )
+    train_group.add_argument(
+        '--use-randomized-svd',
+        action='store_true',
+        help='Use randomized SVD for large matrices (>5000 features) - faster and memory efficient'
+    )
+    train_group.add_argument(
+        '--svd-n-iter',
+        type=int,
+        default=5,
+        help='Number of power iterations for randomized SVD (default: 5)'
+    )
+    train_group.add_argument(
+        '--svd-n-oversamples',
+        type=int,
+        default=20,
+        help='Number of oversamples for randomized SVD (default: 20)'
     )
     
     # Benchmark arguments
@@ -299,14 +352,28 @@ Examples:
     
     try:
         args = parser.parse_args()
-        
+    except SystemExit:
+        # Parser already printed help or error message
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to parse arguments: {e}")
+        sys.exit(1)
+    
+    try:
         # Validate arguments based on mode
         if args.mode == 'train':
             if not args.dataset:
-                parser.error("--dataset is required for training mode")
+                raise ConfigError("--dataset is required for training mode")
             
-            # Import and run training
-            from train.wikipedia_train import WikipediaTrainer
+            dataset_path = Path(args.dataset)
+            if not dataset_path.exists():
+                raise DataError(f"Dataset file not found: {dataset_path}")
+            
+            # Import and run training with error handling
+            try:
+                from train.wikipedia_train import WikipediaTrainer
+            except ImportError as e:
+                raise ModelError(f"Failed to import training module: {e}")
             
             # Handle 'auto' device selection for training
             device = args.device
@@ -315,46 +382,73 @@ Examples:
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
                 logger.info(f"Auto-selected device: {device}")
             
-            trainer = WikipediaTrainer(
-                n_bits=args.bits,
-                max_features=args.max_features,
-                output_dir=args.output,
-                device=device,
-                threshold_strategy=args.threshold_strategy,
-                pack_bits=bool(args.pack_bits),
-                bitorder=args.bitorder,
-                backend=args.backend,
-                format_version=args.format_version
-            )
+            try:
+                trainer = WikipediaTrainer(
+                    n_bits=args.bits,
+                    max_features=args.max_features,
+                    output_dir=args.output,
+                    device=device,
+                    threshold_strategy=args.threshold_strategy,
+                    pack_bits=bool(args.pack_bits),
+                    bitorder=args.bitorder,
+                    backend=args.backend,
+                    format_version=args.format_version,
+                    use_randomized_svd=args.use_randomized_svd,
+                    svd_n_iter=args.svd_n_iter,
+                    svd_n_oversamples=args.svd_n_oversamples
+                )
+            except Exception as e:
+                raise ModelError(f"Failed to initialize trainer: {e}")
             
             logger.info(f"Starting training with dataset: {args.dataset}")
-            trainer.train(
-                dataset_path=args.dataset,
-                memory_limit_gb=args.memory_limit,
-                batch_size=args.batch_size,
-                max_titles=args.max_titles
-            )
+            try:
+                trainer.train(
+                    dataset_path=args.dataset,
+                    memory_limit_gb=args.memory_limit,
+                    batch_size=args.batch_size,
+                    max_titles=args.max_titles
+                )
+                logger.info("Training completed successfully")
+            except MemoryError as e:
+                raise MemoryError(f"Training failed due to memory constraints: {e}")
+            except Exception as e:
+                raise ModelError(f"Training failed: {e}")
             
         elif args.mode == 'demo':
-            # Import and run demo
-            from demo.wikipedia_demo import WikipediaDemo
+            # Import and run demo with error handling
+            try:
+                from demo.wikipedia_demo import WikipediaDemo
+            except ImportError as e:
+                raise ModelError(f"Failed to import demo module: {e}")
             
-            demo = WikipediaDemo(
-                model_dir=args.model,
-                device=args.device
-            )
+            model_path = Path(args.model)
+            if not model_path.exists():
+                raise DataError(f"Model directory not found: {model_path}")
             
-            if args.query:
-                # Single query mode
-                results = demo.search(args.query, k=args.top_k)
-                demo.display_results(args.query, results)
-            elif args.pattern:
-                # Pattern search mode
-                results = demo.search_pattern(args.pattern)
-                demo.display_pattern_results(args.pattern, results)
-            else:
-                # Interactive mode
-                demo.interactive()
+            try:
+                demo = WikipediaDemo(
+                    model_dir=args.model,
+                    device=args.device
+                )
+            except Exception as e:
+                raise ModelError(f"Failed to initialize demo: {e}")
+            
+            try:
+                if args.query:
+                    # Single query mode
+                    results = demo.search(args.query, k=args.top_k)
+                    demo.display_results(args.query, results)
+                elif args.pattern:
+                    # Pattern search mode
+                    results = demo.search_pattern(args.pattern)
+                    demo.display_pattern_results(args.pattern, results)
+                else:
+                    # Interactive mode
+                    demo.interactive()
+            except KeyboardInterrupt:
+                logger.info("Demo interrupted by user")
+            except Exception as e:
+                raise ModelError(f"Demo search failed: {e}")
                 
         elif args.mode == 'benchmark':
             # Import and run benchmark
@@ -412,9 +506,14 @@ Examples:
             
             logger.info("Starting calibration analysis...")
             
-            # Load model and fingerprints
-            encoder = GoldenRatioEncoder()
-            encoder.load(args.model)
+            # Load model and fingerprints with error handling
+            try:
+                encoder = GoldenRatioEncoder()
+                encoder.load(args.model)
+            except FileNotFoundError as e:
+                raise DataError(f"Model files not found: {e}")
+            except Exception as e:
+                raise ModelError(f"Failed to load encoder: {e}")
             
             # Load fingerprint database
             fingerprints_file = Path(args.model) / "fingerprints.pt"
@@ -422,8 +521,13 @@ Examples:
                 logger.error(f"Fingerprints not found at {fingerprints_file}")
                 sys.exit(1)
             
-            data = torch.load(fingerprints_file)
-            titles = data['titles']
+            try:
+                data = torch.load(fingerprints_file)
+                titles = data.get('titles', [])
+                if not titles:
+                    raise DataError("No titles found in fingerprint data")
+            except Exception as e:
+                raise DataError(f"Failed to load fingerprint data: {e}")
             
             # Handle packed/unpacked fingerprints
             if 'fingerprints' in data:
@@ -556,10 +660,12 @@ Examples:
             else:
                 baseline_fingerprints = baseline_data
             
-            # Initialize drift monitor with supported parameters
+            # Initialize drift monitor with all threshold parameters
             monitor = DriftMonitor(
                 baseline_fingerprints=None,
                 drift_threshold=args.ks_threshold,  # Use KS threshold as drift threshold
+                js_threshold=args.js_threshold,
+                entropy_threshold=args.entropy_threshold,
                 sensitivity='medium',  # Can be made configurable if needed
                 min_batch_size=50
             )
@@ -569,7 +675,7 @@ Examples:
             
             if args.batch:
                 # Single batch analysis
-                batch_data = torch.load(args.batch)
+                batch_data = torch.load(args.batch, map_location='cpu', weights_only=True)
                 if isinstance(batch_data, dict):
                     if 'fingerprints' in batch_data:
                         batch_fingerprints = batch_data['fingerprints']
@@ -631,7 +737,12 @@ Examples:
     except KeyboardInterrupt:
         logger.info("\nOperation cancelled by user")
         sys.exit(0)
-        
+    except TejasError as e:
+        handle_error(e, logger)
+    except FileNotFoundError as e:
+        handle_error(e, logger)
+    except MemoryError as e:
+        handle_error(e, logger)
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         logger.error(f"Exception type: {type(e).__name__}")
@@ -641,4 +752,9 @@ Examples:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # Last resort error handler
+        print(f"Critical failure: {e}", file=sys.stderr)
+        sys.exit(1)

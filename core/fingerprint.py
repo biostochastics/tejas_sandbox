@@ -14,6 +14,8 @@ import time
 import logging
 from typing import List, Tuple, Union, Optional, Literal
 from pathlib import Path
+from collections import OrderedDict
+import hashlib
 from core.bitops import (
     pack_bits_rows, unpack_bits_rows, hamming_distance_packed,
     search_packed_vectorized, POPCOUNT_LUT
@@ -33,9 +35,10 @@ class BinaryFingerprintSearch:
                  device: str = 'auto',
                  format_hint: Literal['unpacked', 'packed', 'auto'] = 'auto',
                  bitorder: Literal['little', 'big'] = 'little',
-                 backend: str = 'auto'):
+                 backend: str = 'auto',
+                 cache_size: int = 1000):
         """
-        Initialize search engine with automatic format detection.
+        Initialize search engine with automatic format detection and caching.
         
         Args:
             fingerprints: Either (N, n_bits) bool/int or (N, n_bytes) uint8
@@ -44,6 +47,7 @@ class BinaryFingerprintSearch:
             format_hint: 'packed', 'unpacked', 'auto' (auto-detect)
             bitorder: 'little' or 'big' (endianness for packed format)
             backend: Backend for packed operations ('numpy', 'numba', 'auto')
+            cache_size: Maximum number of cached query results (0 to disable)
         """
         # Convert to numpy if needed for format detection
         if isinstance(fingerprints, torch.Tensor):
@@ -62,6 +66,14 @@ class BinaryFingerprintSearch:
         
         self.bitorder = bitorder
         self.format_hint = format_hint
+        
+        # Initialize query cache
+        self.cache_size = cache_size
+        if cache_size > 0:
+            self.query_cache = OrderedDict()
+            logger.info(f"Query cache enabled with size {cache_size}")
+        else:
+            self.query_cache = None
 
         # Tentatively assume unpacked to get n_bits, then detect format
         self.n_bits = fp_np.shape[1]
@@ -94,7 +106,7 @@ class BinaryFingerprintSearch:
     
     def _detect_format(self, fp: np.ndarray, hint: Optional[str] = None) -> str:
         """
-        Auto-detect packed vs unpacked format based on dtype and dimensions.
+        Auto-detect packed vs unpacked format with improved heuristics.
         
         Args:
             fp: Fingerprint array to analyze
@@ -107,55 +119,91 @@ class BinaryFingerprintSearch:
             logger.info(f"Using format hint: {hint}")
             return hint
         
-        # Detection logic:
-        # - dtype uint8 AND small width (< 32) → likely packed
-        # - dtype bool/int AND large width (> 32) → likely unpacked
-        # - Edge cases: validate against reasonable bounds
+        # Empty array edge case
+        if fp.size == 0:
+            logger.warning("Empty array, defaulting to unpacked format")
+            return 'unpacked'
         
         dtype = fp.dtype
         n_cols = fp.shape[1] if fp.ndim > 1 else 1
         
-        if dtype == np.uint8 and n_cols < 32:
-            detected = 'packed'
-            logger.info(f"Auto-detected packed format: dtype={dtype}, width={n_cols}")
-        elif dtype in [bool, np.bool_, np.uint8, np.int8, np.int32] and n_cols >= 32:
-            detected = 'unpacked'
-            logger.info(f"Auto-detected unpacked format: dtype={dtype}, width={n_cols}")
-        else:
-            # Ambiguous case: use heuristics
-            if dtype == np.uint8:
-                # Could be either; use width as tie-breaker
-                detected = 'packed' if n_cols <= 16 else 'unpacked'
-                logger.warning(f"Ambiguous format, guessing {detected} based on width={n_cols}")
-            else:
-                # Non-uint8 likely means unpacked
-                detected = 'unpacked'
-                logger.info(f"Non-uint8 dtype, assuming unpacked: dtype={dtype}")
+        # Improved detection logic with explicit checks
         
-        # Critical fix: Check actual data values to prevent misclassification
-        # Unpacked format should only have values 0 or 1
-        if detected == 'unpacked' and len(fp) > 0:
-            # Sample a subset for efficiency on large arrays
-            sample_size = min(1000, len(fp))
-            sample = fp[:sample_size] if fp.ndim == 1 else fp[:sample_size].flat[:1000]
-            max_val = np.max(sample)
-            min_val = np.min(sample)
-            unique_vals = np.unique(sample)
-            
-            # More robust detection: unpacked should be binary (0,1)
-            if max_val > 1 or min_val < 0 or len(unique_vals) > 2:
+        # Step 1: Check data values first (most reliable)
+        sample_size = min(1000, fp.size)
+        if fp.ndim == 1:
+            sample = fp[:sample_size]
+        else:
+            # Sample from flattened array for 2D
+            sample = fp.flat[:sample_size]
+        
+        unique_vals = np.unique(sample)
+        max_val = np.max(sample) if len(sample) > 0 else 0
+        min_val = np.min(sample) if len(sample) > 0 else 0
+        
+        # Binary check: if only contains 0 and 1, likely unpacked
+        is_binary = len(unique_vals) <= 2 and min_val >= 0 and max_val <= 1
+        
+        # Step 2: Use dimensions and dtype as secondary indicators
+        if is_binary:
+            # Binary values - check dimensions to confirm
+            if n_cols >= 32:  # Typical bit counts: 64, 128, 256
+                detected = 'unpacked'
+                logger.info(f"Detected unpacked: binary values, {n_cols} columns")
+            elif n_cols < 32 and dtype == np.uint8:
+                # Small width with binary values could be packed
+                # Check if columns are multiples of 8 (byte-aligned)
+                if n_cols % 8 == 0 and n_cols <= 16:
+                    detected = 'packed'
+                    logger.info(f"Detected packed: binary values but only {n_cols} bytes")
+                else:
+                    detected = 'unpacked'
+                    logger.info(f"Detected unpacked: binary values, non-byte-aligned width")
+            else:
+                detected = 'unpacked'
+                logger.info(f"Detected unpacked: binary values, default")
+        else:
+            # Non-binary values - definitely packed
+            if dtype == np.uint8 and n_cols < 32:
                 detected = 'packed'
-                logger.info(f"Overriding to 'packed' due to non-binary values (range=[{min_val},{max_val}], unique={len(unique_vals)})")
+                logger.info(f"Detected packed: non-binary uint8 values (range=[{min_val},{max_val}])")
+            else:
+                # Unusual case - non-binary with large width or non-uint8
+                logger.warning(f"Unusual format: non-binary values with dtype={dtype}, width={n_cols}")
+                logger.warning(f"Value range=[{min_val},{max_val}], unique count={len(unique_vals)}")
+                # Default to packed for non-binary data
+                detected = 'packed'
+        
+        # Step 3: Sanity checks
+        if detected == 'packed':
+            # Packed format typically has width = n_bits/8
+            expected_widths = [8, 16, 32, 64]  # Common byte counts for 64, 128, 256, 512 bits
+            if n_cols not in expected_widths:
+                logger.warning(f"Packed format with unusual width: {n_cols} bytes")
+        elif detected == 'unpacked':
+            # Unpacked format typically has width = n_bits
+            expected_widths = [64, 128, 256, 512]  # Common bit counts
+            if n_cols not in expected_widths:
+                logger.warning(f"Unpacked format with unusual width: {n_cols} bits")
         
         return detected
+    
+    def _get_cache_key(self, query_np: np.ndarray, k: int) -> str:
+        """Generate cache key for query."""
+        # Use hash of query fingerprint and k value
+        query_bytes = query_np.tobytes()
+        hash_obj = hashlib.md5(query_bytes)
+        hash_obj.update(str(k).encode())
+        return hash_obj.hexdigest()
     
     def search(self, query_fingerprint: Union[torch.Tensor, np.ndarray], 
                k: int = 10, 
                show_pattern_analysis: bool = True,
                return_distances: bool = True,
-               backend: Optional[str] = None) -> List[Tuple[str, float, int]]:
+               backend: Optional[str] = None,
+               use_cache: bool = True) -> List[Tuple[str, float, int]]:
         """
-        Unified search supporting both packed and unpacked formats.
+        Unified search supporting both packed and unpacked formats with caching.
         
         Args:
             query_fingerprint: Query fingerprint (torch.Tensor or np.ndarray)
@@ -163,20 +211,36 @@ class BinaryFingerprintSearch:
             show_pattern_analysis: Show pattern family analysis
             return_distances: Include distances in results
             backend: Override backend for search (None uses instance default)
+            use_cache: Whether to use query cache (if available)
             
         Returns:
             List of (title, similarity, distance) tuples
         """
         start_time = time.time()
         
-        # Use provided backend or instance default
-        search_backend = backend if backend is not None else self.backend
-        
-        # Convert query to numpy for format detection
+        # Convert query to numpy for caching and format detection
         if isinstance(query_fingerprint, torch.Tensor):
             query_np = query_fingerprint.detach().cpu().numpy()
         else:
             query_np = query_fingerprint
+        
+        # Check cache if enabled
+        if use_cache and self.query_cache is not None:
+            cache_key = self._get_cache_key(query_np, k)
+            if cache_key in self.query_cache:
+                # Move to end (LRU)
+                self.query_cache.move_to_end(cache_key)
+                cached_results = self.query_cache[cache_key]
+                logger.debug(f"Cache hit for query (k={k})")
+                
+                # Still show pattern analysis if requested
+                if show_pattern_analysis:
+                    self._analyze_patterns(cached_results)
+                
+                return cached_results
+        
+        # Use provided backend or instance default
+        search_backend = backend if backend is not None else self.backend
         
         # Standardize search path: convert query to match database format
         query_format = self._detect_format(query_np.reshape(1, -1))
@@ -218,6 +282,17 @@ class BinaryFingerprintSearch:
         # Pattern analysis
         if show_pattern_analysis:
             self._analyze_patterns(results)
+        
+        # Store in cache if enabled
+        if use_cache and self.query_cache is not None:
+            cache_key = self._get_cache_key(query_np, k)
+            self.query_cache[cache_key] = results
+            
+            # Enforce cache size limit (LRU eviction)
+            if len(self.query_cache) > self.cache_size:
+                # Remove oldest item (first in OrderedDict)
+                self.query_cache.popitem(last=False)
+                logger.debug(f"Cache eviction: size limit {self.cache_size} reached")
         
         return results
     
@@ -289,12 +364,12 @@ class BinaryFingerprintSearch:
         xor_result = self.fingerprints ^ query_tensor.unsqueeze(0)
         hamming_distances = xor_result.sum(dim=1)
         
-        # Get top-k nearest using a stable sort to handle ties consistently
+        # Get top-k nearest using optimized method
         if k >= len(hamming_distances):
             sorted_indices = torch.argsort(hamming_distances, stable=True)
         else:
-            # For k < N, full sort is efficient enough and guarantees stability.
-            sorted_indices = torch.argsort(hamming_distances, stable=True)[:k]
+            # Use topk for better performance when k < N
+            values, sorted_indices = torch.topk(hamming_distances, k, largest=False, sorted=True)
 
         indices_torch = sorted_indices
         distances_torch = hamming_distances[indices_torch]

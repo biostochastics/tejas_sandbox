@@ -30,6 +30,39 @@ try:
 except ImportError:
     HAS_SCIPY = False
     jensenshannon = None
+    stats = None
+    
+    # Fallback implementation for Jensen-Shannon divergence
+    def jensenshannon_fallback(p, q):
+        """Pure Python Jensen-Shannon divergence implementation."""
+        p = np.array(p, dtype=float)
+        q = np.array(q, dtype=float)
+        
+        # Add small epsilon to avoid log(0)
+        epsilon = 1e-10
+        p = p + epsilon
+        q = q + epsilon
+        
+        # Normalize
+        p = p / np.sum(p)
+        q = q / np.sum(q)
+        
+        # Calculate average distribution
+        m = 0.5 * (p + q)
+        
+        # Calculate KL divergences
+        def kl_div(a, b):
+            return np.sum(a * np.log2(a / b))
+        
+        # JS divergence is average of KL divergences
+        js_div = 0.5 * kl_div(p, m) + 0.5 * kl_div(q, m)
+        
+        # Return square root for consistency with scipy
+        return np.sqrt(js_div)
+    
+    # Use fallback if scipy not available
+    if jensenshannon is None:
+        jensenshannon = jensenshannon_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +134,8 @@ class DriftMonitor:
                  baseline_fingerprints: Optional[np.ndarray] = None,
                  history_size: int = 1000,
                  drift_threshold: float = 0.05,
+                 js_threshold: Optional[float] = None,
+                 entropy_threshold: Optional[float] = None,
                  sensitivity: str = 'medium',
                  min_batch_size: int = 50):
         """
@@ -133,6 +168,12 @@ class DriftMonitor:
         }
         
         self.config = sensitivity_config.get(sensitivity, sensitivity_config['medium'])
+        
+        # Override with provided thresholds if specified
+        if js_threshold is not None:
+            self.config['js_threshold'] = js_threshold
+        if entropy_threshold is not None:
+            self.config['activation_threshold'] = entropy_threshold
         
         # Compute baseline statistics if provided
         if baseline_fingerprints is not None:
@@ -179,13 +220,8 @@ class DriftMonitor:
         bit_entropy = -(p * np.log2(p) + (1-p) * np.log2(1-p))
         total_entropy = np.mean(bit_entropy)
         
-        # Compute covariance matrix (sample for efficiency)
-        if len(fp) > 1000:
-            sample_idx = np.random.choice(len(fp), 1000, replace=False)
-            fp_sample_cov = fp[sample_idx]
-        else:
-            fp_sample_cov = fp
-        covariance_matrix = np.cov(fp_sample_cov.T)
+        # Note: Covariance matrix computation removed (was unused)
+        # Could be added back if needed for advanced drift detection
         
         # Hamming distance statistics (pairwise distances in sample)
         if len(fp) > 1:
@@ -219,7 +255,6 @@ class DriftMonitor:
             'mean_hamming_distance': mean_hamming,
             'hamming_std': std_hamming,
             'n_samples': len(fp),
-            'covariance_matrix': covariance_matrix,
             'timestamp': timestamp
         }
         
@@ -368,25 +403,23 @@ class DriftMonitor:
         baseline = self.baseline_stats
         
         # Jensen-Shannon divergence for activation rate distributions
-        if HAS_SCIPY and jensenshannon is not None:
-            try:
-                # Create histograms for comparison
-                baseline_hist, _ = np.histogram(baseline['bit_activation_rates'], bins=20, range=(0, 1))
-                batch_hist, _ = np.histogram(batch_stats['activation_rates'], bins=20, range=(0, 1))
-                
-                # Normalize to probabilities
-                baseline_hist = baseline_hist / baseline_hist.sum()
-                batch_hist = batch_hist / batch_hist.sum()
-                
-                js_div = jensenshannon(baseline_hist, batch_hist) ** 2  # Square for JS divergence
-            except Exception as e:
-                logger.warning(f"Failed to compute JS divergence: {e}")
-                js_div = 0.0
-        else:
+        try:
+            # Create histograms for comparison
+            baseline_hist, _ = np.histogram(baseline['bit_activation_rates'], bins=20, range=(0, 1))
+            batch_hist, _ = np.histogram(batch_stats['activation_rates'], bins=20, range=(0, 1))
+            
+            # Normalize to probabilities
+            baseline_hist = baseline_hist / (baseline_hist.sum() + 1e-10)
+            batch_hist = batch_hist / (batch_hist.sum() + 1e-10)
+            
+            # Use jensenshannon (either scipy or fallback)
+            js_div = jensenshannon(baseline_hist, batch_hist) ** 2  # Square for JS divergence
+        except Exception as e:
+            logger.warning(f"Failed to compute JS divergence: {e}")
             js_div = 0.0
         
         # Kolmogorov-Smirnov test for distribution comparison
-        if HAS_SCIPY:
+        if HAS_SCIPY and stats is not None:
             try:
                 ks_stat, ks_pval = stats.ks_2samp(
                     baseline['bit_activation_rates'], 
@@ -397,8 +430,33 @@ class DriftMonitor:
                 ks_stat = 0.0
                 ks_pval = 1.0
         else:
-            ks_stat = 0.0
-            ks_pval = 1.0
+            # Simple fallback: use maximum difference between CDFs
+            try:
+                # Sort both arrays
+                baseline_sorted = np.sort(baseline['bit_activation_rates'])
+                batch_sorted = np.sort(batch_stats['activation_rates'])
+                
+                # Compute empirical CDFs
+                n1 = len(baseline_sorted)
+                n2 = len(batch_sorted)
+                
+                # Combine and sort all values
+                all_values = np.concatenate([baseline_sorted, batch_sorted])
+                all_values = np.unique(all_values)
+                
+                # Compute maximum difference between CDFs
+                max_diff = 0.0
+                for val in all_values:
+                    cdf1 = np.sum(baseline_sorted <= val) / n1
+                    cdf2 = np.sum(batch_sorted <= val) / n2
+                    max_diff = max(max_diff, abs(cdf1 - cdf2))
+                
+                ks_stat = max_diff
+                # Approximate p-value (simplified)
+                ks_pval = np.exp(-2 * n1 * n2 * ks_stat**2 / (n1 + n2))
+            except:
+                ks_stat = 0.0
+                ks_pval = 1.0
         
         # Drift detection logic
         drift_indicators = []
@@ -588,17 +646,28 @@ class DriftMonitor:
     
     def save_drift_history(self, filepath: Union[str, Path]) -> None:
         """Save drift detection history to file."""
+        import os
         filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        
+        # Convert numpy arrays to lists for JSON serialization
+        baseline_stats_json = {}
+        if self.baseline_stats:
+            for key, value in self.baseline_stats.items():
+                if isinstance(value, np.ndarray):
+                    baseline_stats_json[key] = value.tolist()
+                else:
+                    baseline_stats_json[key] = value
         
         history_data = {
             'total_batches': self.total_batches_processed,
             'config': self.config,
-            'baseline_stats': self.baseline_stats,
+            'baseline_stats': baseline_stats_json,
             'drift_history': [m.to_dict() for m in self.drift_history]
         }
         
         with open(filepath, 'w') as f:
+            os.chmod(filepath, 0o600)  # Restricted file permissions
             json.dump(history_data, f, indent=2)
         
         logger.info(f"Drift history saved to {filepath}")

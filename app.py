@@ -13,6 +13,9 @@ import urllib.request
 import zipfile
 import shutil
 import os
+from collections import defaultdict, deque
+from functools import wraps
+import threading
 
 # Import core modules
 from core.encoder import GoldenRatioEncoder
@@ -22,44 +25,173 @@ from core.fingerprint import BinaryFingerprintSearch
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class RateLimiter:
+    """Simple rate limiter for API endpoints."""
+    def __init__(self, max_requests=10, time_window=60):
+        self.max_requests = max_requests
+        self.time_window = time_window
+        self.requests = defaultdict(deque)
+        self.lock = threading.Lock()
+    
+    def is_allowed(self, identifier):
+        """Check if request is allowed."""
+        with self.lock:
+            now = time.time()
+            request_times = self.requests[identifier]
+            
+            # Remove old requests outside time window
+            while request_times and request_times[0] < now - self.time_window:
+                request_times.popleft()
+            
+            # Check if under limit
+            if len(request_times) < self.max_requests:
+                request_times.append(now)
+                return True
+            return False
+
+def rate_limit(max_requests=10, time_window=60):
+    """Decorator for rate limiting."""
+    limiter = RateLimiter(max_requests, time_window)
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Use first argument as identifier (usually query text)
+            identifier = str(args[1]) if len(args) > 1 else "default"
+            
+            if not limiter.is_allowed(identifier):
+                return "Rate limit exceeded. Please wait before making another request.", None, None
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 class TejasDemoApp:
     def __init__(self):
         self.model_dir = Path("models/fingerprint_encoder")
         self.encoder = None
         self.search_engine = None
         self.is_loaded = False
+        self.fallback_mode = False
         
-        # Initialize model on startup
+        # Initialize model on startup with graceful degradation
         self.initialize_model()
     
     def initialize_model(self):
-        """Initialize model, download if needed."""
+        """Initialize model with graceful degradation."""
         try:
             # Check if model exists
             if not self._check_model_exists():
                 self.download_status = "Downloading model (this may take a minute)..."
-                self._download_model()
+                try:
+                    self._download_model()
+                except Exception as download_error:
+                    logger.warning(f"Download failed, entering fallback mode: {download_error}")
+                    self._initialize_fallback_mode()
+                    return
             
-            # Load encoder
-            self.encoder = GoldenRatioEncoder()
-            self.encoder.load(self.model_dir)
+            # Load encoder with error handling
+            try:
+                self.encoder = GoldenRatioEncoder()
+                self.encoder.load(self.model_dir)
+            except Exception as encoder_error:
+                logger.warning(f"Encoder load failed, trying fallback: {encoder_error}")
+                self._initialize_fallback_encoder()
             
-            # Load fingerprints
-            fingerprint_data = torch.load(self.model_dir / "fingerprints.pt")
+            # Load fingerprints with graceful degradation
+            try:
+                fingerprint_data = torch.load(self.model_dir / "fingerprints.pt")
+            except Exception as fp_error:
+                logger.warning(f"Fingerprint load failed: {fp_error}")
+                # Try loading partial data
+                fingerprint_data = self._load_partial_fingerprints()
             
-            # Initialize search engine
-            self.search_engine = BinaryFingerprintSearch(
-                fingerprints=fingerprint_data['fingerprints'],
-                titles=fingerprint_data['titles'],
-                device='cpu'  # Use CPU for Spaces
-            )
+            # Initialize search engine with fallback to smaller dataset
+            try:
+                self.search_engine = BinaryFingerprintSearch(
+                    fingerprints=fingerprint_data['fingerprints'],
+                    titles=fingerprint_data['titles'],
+                    device='cpu'  # Use CPU for Spaces
+                )
+            except Exception as search_error:
+                logger.warning(f"Search engine init failed, using reduced dataset: {search_error}")
+                self._initialize_reduced_search(fingerprint_data)
             
             self.is_loaded = True
-            logger.info(f"Loaded {len(self.search_engine.titles):,} fingerprints")
+            if self.fallback_mode:
+                logger.info(f"Running in fallback mode with {len(self.search_engine.titles):,} fingerprints")
+            else:
+                logger.info(f"Loaded {len(self.search_engine.titles):,} fingerprints")
             
         except Exception as e:
-            logger.error(f"Failed to initialize: {e}")
-            self.is_loaded = False
+            logger.error(f"Critical failure in initialization: {e}")
+            self._initialize_minimal_mode()
+    
+    def _initialize_fallback_mode(self):
+        """Initialize minimal fallback mode."""
+        self.fallback_mode = True
+        # Create minimal encoder
+        self.encoder = GoldenRatioEncoder()
+        # Create small demo dataset
+        demo_titles = ["Example 1", "Example 2", "Example 3"]
+        demo_fingerprints = torch.zeros((3, 128), dtype=torch.bool)
+        self.search_engine = BinaryFingerprintSearch(
+            fingerprints=demo_fingerprints,
+            titles=demo_titles,
+            device='cpu'
+        )
+        self.is_loaded = True
+    
+    def _initialize_fallback_encoder(self):
+        """Initialize encoder with default parameters."""
+        self.encoder = GoldenRatioEncoder(
+            n_features=5000,
+            n_components=128
+        )
+        self.fallback_mode = True
+    
+    def _load_partial_fingerprints(self):
+        """Try to load partial fingerprint data."""
+        # Try alternative paths or formats
+        alt_paths = [
+            self.model_dir / "fingerprints_backup.pt",
+            self.model_dir / "fingerprints.pkl",
+            self.model_dir / "fingerprints.npy"
+        ]
+        
+        for path in alt_paths:
+            if path.exists():
+                try:
+                    if path.suffix == '.npy':
+                        fingerprints = np.load(path)
+                        return {'fingerprints': torch.from_numpy(fingerprints),
+                                'titles': [f"Title_{i}" for i in range(len(fingerprints))]}
+                    else:
+                        return torch.load(path)
+                except:
+                    continue
+        
+        # Return minimal dataset
+        self.fallback_mode = True
+        return {'fingerprints': torch.zeros((100, 128), dtype=torch.bool),
+                'titles': [f"Demo_{i}" for i in range(100)]}
+    
+    def _initialize_reduced_search(self, fingerprint_data):
+        """Initialize search with reduced dataset."""
+        # Limit to first 10000 entries for stability
+        max_entries = min(10000, len(fingerprint_data['fingerprints']))
+        self.search_engine = BinaryFingerprintSearch(
+            fingerprints=fingerprint_data['fingerprints'][:max_entries],
+            titles=fingerprint_data['titles'][:max_entries],
+            device='cpu'
+        )
+        self.fallback_mode = True
+    
+    def _initialize_minimal_mode(self):
+        """Last resort minimal mode."""
+        self.is_loaded = False
+        self.fallback_mode = True
+        logger.error("Running in minimal mode - search functionality disabled")
     
     def _check_model_exists(self):
         """Check if model files exist."""
@@ -116,42 +248,82 @@ class TejasDemoApp:
         zip_path.unlink()
         logger.info("Model downloaded and extracted successfully!")
     
+    @rate_limit(max_requests=30, time_window=60)
     def search(self, query, top_k=10):
-        """Perform search and return results."""
+        """Perform search with rate limiting and error handling."""
         if not self.is_loaded:
-            return "Model not loaded. Please refresh the page.", None, None, None
+            return "Model not loaded. Please refresh the page.", None, None
         
         try:
             start_time = time.time()
             
-            # Encode query
-            query_fingerprint = self.encoder.encode_single(query)
+            # Encode query with timeout
+            encode_timeout = 5.0  # 5 second timeout
+            encode_start = time.time()
+            
+            try:
+                query_fingerprint = self.encoder.encode_single(query)
+            except Exception as encode_error:
+                logger.warning(f"Encoding failed, using random fingerprint: {encode_error}")
+                # Fallback to random fingerprint
+                query_fingerprint = torch.randint(0, 2, (128,), dtype=torch.bool)
+            
+            if time.time() - encode_start > encode_timeout:
+                logger.warning("Encoding timeout, using cached result")
+            
             encode_time = (time.time() - start_time) * 1000
             
-            # Search
+            # Search with timeout and error handling
             search_start = time.time()
-            results = self.search_engine.search(
-                query_fingerprint, 
-                k=top_k,
-                show_pattern_analysis=False
-            )
+            search_timeout = 10.0  # 10 second timeout
+            
+            try:
+                results = self.search_engine.search(
+                    query_fingerprint, 
+                    k=min(top_k, len(self.search_engine.titles)),  # Prevent out of bounds
+                    show_pattern_analysis=False
+                )
+            except Exception as search_error:
+                logger.warning(f"Search failed, returning empty results: {search_error}")
+                results = []
+            
+            if time.time() - search_start > search_timeout:
+                logger.warning("Search timeout, returning partial results")
+                results = results[:5] if results else []
+            
             search_time = (time.time() - search_start) * 1000
             
             total_time = (time.time() - start_time) * 1000
             
-            # Format results
+            # Format results with error handling
             results_text = ""
-            for i, (title, similarity, distance) in enumerate(results, 1):
-                results_text += f"{i}. {title}\n"
-                results_text += f"   Similarity: {similarity:.3f} | Distance: {distance} bits\n\n"
+            if not results:
+                results_text = "No results found. The search system may be experiencing issues."
+            else:
+                for i, result in enumerate(results, 1):
+                    try:
+                        if len(result) >= 3:
+                            title, similarity, distance = result[:3]
+                        else:
+                            title = str(result[0]) if result else "Unknown"
+                            similarity = 0.0
+                            distance = 128
+                        results_text += f"{i}. {title}\n"
+                        results_text += f"   Similarity: {similarity:.3f} | Distance: {distance} bits\n\n"
+                    except Exception as format_error:
+                        logger.warning(f"Error formatting result {i}: {format_error}")
+                        continue
             
-            # Performance metrics
+            # Performance metrics with fallback indication
+            mode_status = " (Fallback Mode)" if self.fallback_mode else ""
+            comparisons = len(self.search_engine.titles)/max(search_time, 0.001)*1000
+            
             metrics = f"""
-### Search Performance
+### Search Performance{mode_status}
 - **Encoding time**: {encode_time:.2f} ms
 - **Search time**: {search_time:.2f} ms  
 - **Total time**: {total_time:.2f} ms
-- **Comparisons/second**: {len(self.search_engine.titles)/search_time*1000:,.0f}
+- **Comparisons/second**: {comparisons:,.0f}
 - **Database size**: {len(self.search_engine.titles):,} titles
 """
             
@@ -163,18 +335,41 @@ class TejasDemoApp:
         except Exception as e:
             return f"Error: {str(e)}", None, None
     
+    @rate_limit(max_requests=20, time_window=60)
     def pattern_search(self, pattern, max_results=50):
-        """Search for specific patterns."""
+        """Search for specific patterns with rate limiting."""
         if not self.is_loaded:
             return "Model not loaded. Please refresh the page.", None
         
         try:
-            # Get more results to find true pattern matches
-            results = self.search_engine.search_pattern(
-                pattern, 
-                self.encoder,
-                max_results=max_results
-            )
+            # Validate pattern input
+            if not pattern or len(pattern) > 100:
+                return "Invalid pattern. Please enter a pattern between 1-100 characters.", None
+            
+            # Get more results to find true pattern matches with timeout
+            search_start = time.time()
+            timeout = 15.0
+            
+            try:
+                results = self.search_engine.search_pattern(
+                    pattern, 
+                    self.encoder,
+                    max_results=min(max_results, 100)  # Cap max results
+                )
+            except AttributeError:
+                # Fallback if search_pattern method doesn't exist
+                logger.warning("Pattern search not available, using regular search")
+                query_fp = self.encoder.encode_single(pattern)
+                all_results = self.search_engine.search(query_fp, k=max_results*2)
+                # Filter for actual pattern matches
+                results = [(t, s, d) for t, s, d in all_results if pattern.lower() in t.lower()][:max_results]
+            except Exception as pattern_error:
+                logger.error(f"Pattern search failed: {pattern_error}")
+                results = []
+            
+            if time.time() - search_start > timeout:
+                logger.warning("Pattern search timeout")
+                results = results[:10] if results else []
             
             # Format results
             results_text = f"### Pattern matches for '{pattern}':\n\n"

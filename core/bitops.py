@@ -19,6 +19,12 @@ from typing import Union, Literal, Optional, Tuple
 import time
 import sys
 
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 logger = logging.getLogger(__name__)
 
 # Pre-compute popcount lookup table for all 256 uint8 values
@@ -52,14 +58,14 @@ except ImportError:
     logger.info("Numba not available, falling back to numpy backend")
 
 
-def pack_bits_rows(binary_matrix: np.ndarray, 
+def pack_bits_rows(binary_matrix: Union[np.ndarray, 'torch.Tensor'], 
                    bitorder: Literal['little', 'big'] = 'little',
                    n_bits: Optional[int] = None) -> np.ndarray:
     """
     Pack binary matrix to uint8 bytes with specified bit ordering.
     
     Args:
-        binary_matrix: (N, M) bool/int array with values {0, 1}
+        binary_matrix: (N, M) bool/int array or torch tensor with values {0, 1}
         bitorder: 'little' or 'big' endian bit packing
         n_bits: Target bits (pad/truncate if needed). If None, use matrix width.
     
@@ -76,6 +82,11 @@ def pack_bits_rows(binary_matrix: np.ndarray,
         
         Note: Bitorder must match between pack/unpack for roundtrip integrity.
     """
+    # Handle torch tensors
+    if hasattr(binary_matrix, 'detach'):
+        # It's a torch tensor
+        binary_matrix = binary_matrix.detach().cpu().numpy()
+    
     if binary_matrix.size == 0:
         return np.array([], dtype=np.uint8).reshape(0, 0)
     
@@ -183,12 +194,18 @@ def hamming_distance_packed(query_packed: np.ndarray,
     
     # Backend selection
     if backend == 'auto':
-        # NumPy is often faster than Numba for this workload due to:
-        # 1. Highly optimized BLAS operations
-        # 2. Small inner loop (just XOR + LUT lookup)
-        # 3. Numba JIT overhead
-        # Use Numba only when explicitly requested
-        backend = 'numpy'
+        # Choose backend based on availability and dataset size
+        # Numba becomes beneficial for larger datasets despite JIT overhead
+        n_items = database_packed.shape[0]
+        
+        if HAS_NUMBA and n_items > 10000:
+            # Use Numba for large datasets where parallelization helps
+            backend = 'numba'
+            logger.debug(f"Auto-selected numba backend for {n_items} items")
+        else:
+            # Use NumPy for small datasets or when Numba unavailable
+            backend = 'numpy'
+            logger.debug(f"Auto-selected numpy backend for {n_items} items")
     
     # Route to appropriate implementation
     start_time = time.time()

@@ -1,0 +1,282 @@
+{
+  "timestamp": "2025-08-20 23:26:42",
+  "n_samples": 5000,
+  "encoding_results": [
+    {
+      "config": {
+        "name": "Baseline (Standard SVD + Zero)",
+        "svd_type": "standard",
+        "threshold": "zero",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 4.427188158035278,
+        "train": 4.317882776260376,
+        "encode": 0.10924124717712402,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 440.703125,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.5006046875,
+        "unique_fingerprints": 996,
+        "docs_per_second": 1129.3850230704736
+      },
+      "fingerprints": "[[0 1 0 ... 1 1 0]\n [0 0 1 ... 1 1 1]\n [0 0 1 ... 1 1 0]\n ...\n [0 1 0 ... 1 0 1]\n [0 0 1 ... 1 1 0]\n [0 1 0 ... 0 1 0]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "Randomized SVD + Zero",
+        "svd_type": "randomized",
+        "threshold": "zero",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 4.3866050243377686,
+        "train": 4.29488468170166,
+        "encode": 0.09165000915527344,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 14.765625,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.5006046875,
+        "unique_fingerprints": 996,
+        "docs_per_second": 1139.8336463527016
+      },
+      "fingerprints": "[[0 1 0 ... 1 1 0]\n [0 0 1 ... 1 1 1]\n [0 0 1 ... 1 1 0]\n ...\n [0 1 0 ... 1 0 1]\n [0 0 1 ... 1 1 0]\n [0 1 0 ... 0 1 0]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "Randomized SVD + Median",
+        "svd_type": "randomized",
+        "threshold": "median",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 4.325770854949951,
+        "train": 4.231597900390625,
+        "encode": 0.09411096572875977,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 14.765625,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.49901875,
+        "unique_fingerprints": 997,
+        "docs_per_second": 1155.863351910685
+      },
+      "fingerprints": "[[0 1 0 ... 1 1 0]\n [0 0 1 ... 1 1 1]\n [0 0 1 ... 1 1 1]\n ...\n [0 1 0 ... 1 0 1]\n [0 0 1 ... 1 1 0]\n [0 1 0 ... 0 1 0]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "Standard SVD + ITQ",
+        "svd_type": "standard",
+        "threshold": "itq",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 4.777302980422974,
+        "train": 4.687733888626099,
+        "encode": 0.08952212333679199,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 99.5,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.500521875,
+        "unique_fingerprints": 897,
+        "docs_per_second": 1046.6156365819002
+      },
+      "fingerprints": "[[0 0 0 ... 0 1 0]\n [1 1 1 ... 0 1 1]\n [0 1 1 ... 0 1 1]\n ...\n [1 0 1 ... 1 0 1]\n [1 1 1 ... 0 1 0]\n [1 1 0 ... 0 1 1]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "Randomized SVD + ITQ",
+        "svd_type": "randomized",
+        "threshold": "itq",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 4.6847710609436035,
+        "train": 4.590646028518677,
+        "encode": 0.09407901763916016,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 30.125,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.500521875,
+        "unique_fingerprints": 897,
+        "docs_per_second": 1067.288013641568
+      },
+      "fingerprints": "[[0 0 0 ... 0 1 0]\n [1 1 1 ... 0 1 1]\n [0 1 1 ... 0 1 1]\n ...\n [1 0 1 ... 1 0 1]\n [1 1 1 ... 0 1 0]\n [1 1 0 ... 0 1 1]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "Randomized + ITQ + Packed",
+        "svd_type": "randomized",
+        "threshold": "itq",
+        "n_bits": 128,
+        "max_features": 5000,
+        "bit_packing": true
+      },
+      "times": {
+        "total": 4.679884910583496,
+        "train": 4.587148189544678,
+        "encode": 0.091522216796875,
+        "pack": 0.0011668205261230469
+      },
+      "memory": {
+        "peak_mb": 19.6875,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.08,
+        "compression_ratio": 8.0
+      },
+      "metrics": {
+        "bit_balance": 0.496796875,
+        "unique_fingerprints": 897,
+        "docs_per_second": 1068.4023422654193
+      },
+      "fingerprints": "[[232 131 190 ...  67  22  90]\n [ 39  93 175 ...  86 251 196]\n [ 46 193  15 ...  83 119 196]\n ...\n [229 105 108 ... 164 200 168]\n [ 95 103 171 ... 238  97  65]\n [ 67 202  88 ... 120 170 219]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "256-bit Randomized + ITQ",
+        "svd_type": "randomized",
+        "threshold": "itq",
+        "n_bits": 256,
+        "max_features": 5000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 5.102405786514282,
+        "train": 4.998262882232666,
+        "encode": 0.10409998893737793,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 48.921875,
+        "unpacked_mb": 1.28,
+        "packed_mb": 1.28,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.49890546875,
+        "unique_fingerprints": 968,
+        "docs_per_second": 979.9299015407709
+      },
+      "fingerprints": "[[1 0 1 ... 0 1 1]\n [1 0 0 ... 0 1 0]\n [1 0 0 ... 0 0 1]\n ...\n [0 0 0 ... 1 1 1]\n [0 0 0 ... 0 0 1]\n [0 1 1 ... 0 0 0]]",
+      "success": true
+    },
+    {
+      "config": {
+        "name": "High-dim (10K features)",
+        "svd_type": "randomized",
+        "threshold": "zero",
+        "n_bits": 128,
+        "max_features": 10000,
+        "bit_packing": false
+      },
+      "times": {
+        "total": 0.9901759624481201,
+        "train": 0.8936538696289062,
+        "encode": 0.09646415710449219,
+        "pack": 0
+      },
+      "memory": {
+        "peak_mb": 60.875,
+        "unpacked_mb": 0.64,
+        "packed_mb": 0.64,
+        "compression_ratio": 1.0
+      },
+      "metrics": {
+        "bit_balance": 0.24453125,
+        "unique_fingerprints": 990,
+        "docs_per_second": 5049.6075340366315
+      },
+      "fingerprints": "[[1 1 0 ... 0 0 0]\n [1 0 1 ... 0 0 0]\n [1 0 1 ... 0 0 0]\n ...\n [1 1 0 ... 0 0 0]\n [1 0 1 ... 0 0 0]\n [1 1 0 ... 0 0 0]]",
+      "success": true
+    }
+  ],
+  "search_results": [
+    {
+      "backend": "numpy",
+      "times": {
+        "build_index": 0.0001838207244873047,
+        "mean_search_ms": 0.6895279884338379,
+        "total_queries": 0.06895279884338379
+      },
+      "metrics": {
+        "precision_at_10": 1.0,
+        "throughput_docs_per_sec": 7251337.268203963,
+        "queries_per_sec": 1450.2674536407926
+      },
+      "success": true
+    },
+    {
+      "backend": "numba",
+      "times": {
+        "build_index": 0.00010371208190917969,
+        "mean_search_ms": 0.607914924621582,
+        "total_queries": 0.0607914924621582
+      },
+      "metrics": {
+        "precision_at_10": 1.0,
+        "throughput_docs_per_sec": 8224835.083811152,
+        "queries_per_sec": 1644.9670167622303
+      },
+      "success": true
+    },
+    {
+      "backend": "torch",
+      "times": {
+        "build_index": 0.00010204315185546875,
+        "mean_search_ms": 0.6057882308959961,
+        "total_queries": 0.06057882308959961
+      },
+      "metrics": {
+        "precision_at_10": 1.0,
+        "throughput_docs_per_sec": 8253709.373991483,
+        "queries_per_sec": 1650.7418747982965
+      },
+      "success": true
+    }
+  ]
+}
