@@ -36,6 +36,15 @@ except ImportError:
     WORD2VEC_AVAILABLE = False
     print("Warning: gensim not available for Word2Vec comparison")
 
+# Hardware profiling imports
+try:
+    import psutil
+    import cpuinfo
+    HARDWARE_PROFILING_AVAILABLE = True
+except ImportError:
+    HARDWARE_PROFILING_AVAILABLE = False
+    print("Warning: psutil/cpuinfo not available for hardware profiling")
+
 try:
     from transformers import AutoTokenizer, AutoModel
     BERT_AVAILABLE = True
@@ -47,6 +56,10 @@ except ImportError:
 from core.encoder import GoldenRatioEncoder
 from core.fingerprint import BinaryFingerprintSearch
 from core.decoder import SemanticDecoder
+from core.fingerprint import unpack_fingerprints
+from core.calibration import StatisticalCalibrator
+from core.drift import DriftMonitor
+from core.bitops import hamming_distance_packed
 
 # Configure logging
 logging.basicConfig(
@@ -70,12 +83,16 @@ plt.rcParams['figure.figsize'] = (8, 6)
 class BenchmarkSuite:
     """
     Comprehensive benchmark suite comparing Tejas, BERT, and Word2Vec.
+    Includes calibration metrics and hardware profiling.
     """
     
     def __init__(self, 
                  data_dir: str = "data/wikipedia",
                  model_dir: str = "models/fingerprint_encoder",
-                 output_dir: str = "benchmark_results"):
+                 output_dir: str = "benchmark_results",
+                 backend: str = "auto",
+                 enable_calibration: bool = True,
+                 enable_hardware_profiling: bool = True):
         """
         Initialize benchmark suite.
         
@@ -83,10 +100,17 @@ class BenchmarkSuite:
             data_dir: Directory containing Wikipedia data
             model_dir: Directory containing trained Tejas model
             output_dir: Directory for benchmark results
+            backend: Backend for bit operations ('numpy', 'numba', 'native', 'auto')
+            enable_calibration: Whether to run calibration metrics
+            enable_hardware_profiling: Whether to profile hardware
         """
         self.data_dir = Path(data_dir)
         self.model_dir = Path(model_dir)
         self.output_dir = Path(output_dir)
+        self.backend = backend
+        self.enable_calibration = enable_calibration
+        self.enable_hardware_profiling = enable_hardware_profiling
+        
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Create subdirectories for different plot types
@@ -95,9 +119,22 @@ class BenchmarkSuite:
         
         # Results storage
         self.results = {}
+        self.hardware_info = {}
+        
+        # Initialize calibration and drift monitoring if enabled
+        if self.enable_calibration:
+            self.calibrator = StatisticalCalibrator()
+            self.drift_monitor = DriftMonitor()
+        
+        # Collect hardware information
+        if self.enable_hardware_profiling and HARDWARE_PROFILING_AVAILABLE:
+            self._collect_hardware_info()
         
         logger.info(f"Initialized BenchmarkSuite")
         logger.info(f"Output directory: {self.output_dir}")
+        logger.info(f"Backend: {self.backend}")
+        logger.info(f"Calibration enabled: {self.enable_calibration}")
+        logger.info(f"Hardware profiling enabled: {self.enable_hardware_profiling}")
     
     def load_test_data(self, n_samples: int = 10000) -> Tuple[List[str], Dict[str, List[str]]]:
         """
@@ -148,6 +185,116 @@ class BenchmarkSuite:
         
         return titles, pattern_families
     
+    def _collect_hardware_info(self):
+        """Collect system hardware information."""
+        if not HARDWARE_PROFILING_AVAILABLE:
+            return
+        
+        try:
+            # CPU information
+            cpu_info = cpuinfo.get_cpu_info()
+            self.hardware_info.update({
+                'cpu_brand': cpu_info.get('brand_raw', 'Unknown'),
+                'cpu_arch': cpu_info.get('arch', 'Unknown'),
+                'cpu_cores': psutil.cpu_count(logical=False),
+                'cpu_threads': psutil.cpu_count(logical=True),
+                'cpu_freq_max': psutil.cpu_freq().max if psutil.cpu_freq() else None,
+            })
+            
+            # Memory information
+            memory = psutil.virtual_memory()
+            self.hardware_info.update({
+                'memory_total_gb': memory.total / (1024**3),
+                'memory_available_gb': memory.available / (1024**3),
+            })
+            
+            # GPU information (if available)
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    self.hardware_info.update({
+                        'gpu_available': True,
+                        'gpu_name': torch.cuda.get_device_name(0),
+                        'gpu_memory_gb': torch.cuda.get_device_properties(0).total_memory / (1024**3),
+                    })
+                else:
+                    self.hardware_info['gpu_available'] = False
+            except ImportError:
+                self.hardware_info['gpu_available'] = False
+            
+            logger.info(f"Hardware info collected: {self.hardware_info}")
+        except Exception as e:
+            logger.warning(f"Failed to collect hardware info: {e}")
+    
+    def _profile_memory_usage(self, func, *args, **kwargs):
+        """Profile memory usage of a function."""
+        if not HARDWARE_PROFILING_AVAILABLE:
+            return func(*args, **kwargs), {}
+        
+        process = psutil.Process()
+        
+        # Measure before
+        memory_before = process.memory_info().rss / 1024**2  # MB
+        
+        # Run function
+        result = func(*args, **kwargs)
+        
+        # Measure after
+        memory_after = process.memory_info().rss / 1024**2  # MB
+        memory_peak = process.memory_info().peak_rss / 1024**2 if hasattr(process.memory_info(), 'peak_rss') else memory_after
+        
+        memory_profile = {
+            'memory_before_mb': memory_before,
+            'memory_after_mb': memory_after,
+            'memory_peak_mb': memory_peak,
+            'memory_delta_mb': memory_after - memory_before,
+        }
+        
+        return result, memory_profile
+
+    def _load_fingerprints_for_search(self):
+        """Load fingerprints.pt and return unpacked fingerprints and titles, handling packed format.
+        
+        Returns:
+            fingerprints: Unpacked binary tensor (n_items, n_bits), dtype uint8
+            titles: List[str]
+            memory_mb: Memory usage of stored database (packed size if applicable)
+        """
+        fingerprints_file = self.model_dir / "fingerprints.pt"
+        if not fingerprints_file.exists():
+            raise FileNotFoundError(f"fingerprints.pt not found at {fingerprints_file}")
+        data = torch.load(fingerprints_file, weights_only=False)
+        titles = data['titles']
+        if 'fingerprints' in data:
+            fingerprints = data['fingerprints']
+            memory_mb = fingerprints.numel() * fingerprints.element_size() / 1024**2
+            logger.info("Loaded unpacked fingerprints for search")
+        elif 'fingerprints_packed' in data:
+            n_bits = (
+                data.get('n_bits')
+                or data.get('metadata', {}).get('n_bits')
+                or None
+            )
+            if n_bits is None:
+                # Fallback to encoder default width if available
+                try:
+                    enc = GoldenRatioEncoder()
+                    enc.load(self.model_dir)
+                    n_bits = int(enc.n_bits)
+                except Exception:
+                    raise KeyError("n_bits missing from fingerprints.pt; cannot unpack")
+            bitorder = data.get('bitorder', 'little')
+            packed = data['fingerprints_packed']
+            fingerprints = unpack_fingerprints(packed, n_bits=int(n_bits), bitorder=bitorder)
+            if isinstance(packed, np.ndarray):
+                memory_mb = packed.size * packed.itemsize / 1024**2
+            else:
+                memory_mb = packed.numel() * packed.element_size() / 1024**2
+            logger.info(f"Loaded packed fingerprints and unpacked for search (bitorder={bitorder}, n_bits={n_bits})")
+        else:
+            raise KeyError("fingerprints.pt missing both 'fingerprints' and 'fingerprints_packed'")
+        return fingerprints, titles, memory_mb
+    
     def benchmark_tejas(self, titles: List[str], pattern_families: Dict[str, List[str]]) -> Dict:
         """Benchmark Tejas binary fingerprint system."""
         logger.info("\n" + "="*60)
@@ -163,10 +310,7 @@ class BenchmarkSuite:
         # Memory usage
         fingerprints_file = self.model_dir / "fingerprints.pt"
         if fingerprints_file.exists():
-            data = torch.load(fingerprints_file)
-            full_fingerprints = data['fingerprints']
-            full_titles = data['titles']
-            memory_mb = full_fingerprints.numel() * full_fingerprints.element_size() / 1024**2
+            full_fingerprints, full_titles, memory_mb = self._load_fingerprints_for_search()
         else:
             # Encode test titles
             fingerprints = encoder.encode(titles, batch_size=1000)
@@ -185,20 +329,32 @@ class BenchmarkSuite:
         results['encode_time_per_title'] = encode_time / len(sample_titles)
         logger.info(f"Encoding speed: {1/results['encode_time_per_title']:.0f} titles/sec")
         
-        # Search speed
+        # Search speed with backend testing
         search_engine = BinaryFingerprintSearch(full_fingerprints, full_titles)
         
         search_times = []
+        throughput_samples = []
+        
         for _ in range(100):
             query_idx = np.random.randint(len(titles))
             query = titles[query_idx]
             start_time = time.time()
-            _ = search_engine.search(encoder.encode_single(query), k=10, show_pattern_analysis=False)
-            search_times.append(time.time() - start_time)
+            _ = search_engine.search(encoder.encode_single(query), k=10, 
+                                   show_pattern_analysis=False)
+            search_time = time.time() - start_time
+            search_times.append(search_time)
+            
+            # Calculate comparisons per second
+            comparisons_per_sec = len(full_fingerprints) / search_time
+            throughput_samples.append(comparisons_per_sec)
         
         results['search_time_ms'] = np.mean(search_times) * 1000
         results['search_std_ms'] = np.std(search_times) * 1000
+        results['throughput_comparisons_per_sec'] = np.mean(throughput_samples)
+        results['throughput_std'] = np.std(throughput_samples)
+        
         logger.info(f"Search time: {results['search_time_ms']:.2f} ± {results['search_std_ms']:.2f} ms")
+        logger.info(f"Throughput: {results['throughput_comparisons_per_sec']:.0f} ± {results['throughput_std']:.0f} comparisons/sec")
         
         # Pattern preservation accuracy
         pattern_accuracies = {}
@@ -228,7 +384,115 @@ class BenchmarkSuite:
         results['false_positive_rate'] = false_positives / len(search_results)
         logger.info(f"False positive rate: {results['false_positive_rate']:.3%}")
         
+        # Calibration metrics if enabled
+        if self.enable_calibration:
+            logger.info("Running calibration analysis...")
+            calibration_results = self._run_calibration_analysis(
+                encoder, full_fingerprints, full_titles, pattern_families
+            )
+            results.update(calibration_results)
+        
         return results
+    
+    def _run_calibration_analysis(self, encoder, fingerprints, titles, pattern_families):
+        """Run statistical calibration analysis on search results."""
+        calibration_results = {}
+        
+        try:
+            # Prepare data for calibration
+            # Create ground truth relevance scores based on pattern membership
+            queries = []
+            relevance_scores = []
+            similarity_scores = []
+            
+            search_engine = BinaryFingerprintSearch(fingerprints, titles)
+            
+            # Sample queries from each pattern family
+            n_queries_per_pattern = min(20, len(titles) // 100)  # Adaptive sampling
+            
+            for pattern, pattern_titles in pattern_families.items():
+                if len(pattern_titles) < 2:
+                    continue
+                
+                # Sample queries from this pattern
+                sample_queries = np.random.choice(
+                    pattern_titles, 
+                    min(n_queries_per_pattern, len(pattern_titles)), 
+                    replace=False
+                )
+                
+                for query_title in sample_queries:
+                    if query_title not in titles:
+                        continue
+                    
+                    # Get search results
+                    query_fp = encoder.encode_single(query_title)
+                    results = search_engine.search(
+                        query_fp, k=50, show_pattern_analysis=False, backend=self.backend
+                    )
+                    
+                    # Create relevance scores (1 for same pattern, 0 otherwise)
+                    query_relevance = []
+                    query_similarities = []
+                    
+                    for result_title, distance, _ in results:
+                        if result_title == query_title:
+                            continue  # Skip self-match
+                        
+                        # Relevance: 1 if same pattern, 0 otherwise
+                        relevance = 1 if pattern in result_title else 0
+                        query_relevance.append(relevance)
+                        
+                        # Convert Hamming distance to similarity score
+                        similarity = 1.0 / (1.0 + float(distance))
+                        query_similarities.append(similarity)
+                    
+                    if len(query_relevance) > 0:
+                        queries.append(query_title)
+                        relevance_scores.append(query_relevance)
+                        similarity_scores.append(query_similarities)
+            
+            if len(queries) == 0:
+                logger.warning("No valid queries for calibration analysis")
+                return {}
+            
+            logger.info(f"Running calibration on {len(queries)} queries")
+            
+            # Run calibration analysis
+            calibration_result = self.calibrator.calibrate_with_cv(
+                similarity_scores, relevance_scores,
+                k_values=[1, 5, 10, 20],
+                n_folds=5,
+                n_bootstrap=100,
+                test_size=0.2
+            )
+            
+            # Extract key metrics
+            calibration_results.update({
+                'calibration_map': calibration_result['metrics']['map'],
+                'calibration_ndcg': calibration_result['metrics']['ndcg'],
+                'calibration_precision_at_5': calibration_result['metrics']['precision@5'],
+                'calibration_recall_at_5': calibration_result['metrics']['recall@5'],
+                'calibration_roc_auc': calibration_result['metrics'].get('roc_auc', 0),
+                'calibration_optimal_threshold': calibration_result.get('optimal_threshold', 0.5),
+                'calibration_confidence_intervals': calibration_result.get('confidence_intervals', {}),
+            })
+            
+            logger.info(f"Calibration MAP: {calibration_results['calibration_map']:.3f}")
+            logger.info(f"Calibration NDCG: {calibration_results['calibration_ndcg']:.3f}")
+            
+            # Save detailed calibration results
+            calibration_file = self.output_dir / 'calibration_results.json'
+            with open(calibration_file, 'w') as f:
+                json.dump(calibration_result, f, indent=2, default=str)
+            
+        except Exception as e:
+            logger.error(f"Calibration analysis failed: {e}")
+            calibration_results = {
+                'calibration_error': str(e)
+            }
+        
+        return calibration_results
     
     def benchmark_word2vec(self, titles: List[str], pattern_families: Dict[str, List[str]]) -> Dict:
         """Benchmark Word2Vec."""
@@ -434,9 +698,9 @@ class BenchmarkSuite:
         encoder = GoldenRatioEncoder()
         encoder.load(self.model_dir)
         
-        # Load fingerprint database
-        data = torch.load(self.model_dir / "fingerprints.pt")
-        search_engine = BinaryFingerprintSearch(data['fingerprints'], data['titles'])
+        # Load fingerprint database (handles packed)
+        fingerprints, titles_db, _ = self._load_fingerprints_for_search()
+        search_engine = BinaryFingerprintSearch(fingerprints, titles_db)
         
         # Prepare test data
         test_patterns = list(pattern_families.keys())
@@ -449,7 +713,7 @@ class BenchmarkSuite:
             pattern_titles = pattern_families[true_pattern][:samples_per_pattern]
             
             for title in pattern_titles:
-                if title in data['titles']:  # Only test if in database
+                if title in titles_db:  # Only test if in database
                     # Get search results
                     query_fp = encoder.encode_single(title)
                     results = search_engine.search(query_fp, k=5, show_pattern_analysis=False)
@@ -813,12 +1077,89 @@ class BenchmarkSuite:
         # Generate summary table
         summary_df = self.generate_summary_table(results)
         
+        # Generate calibration plots if enabled
+        if self.enable_calibration and 'Tejas' in results and 'calibration_map' in results['Tejas']:
+            self._generate_calibration_plots(results)
+        
+        # Save hardware information
+        if self.enable_hardware_profiling and self.hardware_info:
+            with open(self.output_dir / 'hardware_info.json', 'w') as f:
+                json.dump(self.hardware_info, f, indent=2)
+        
         logger.info("\n" + "="*80)
         logger.info("BENCHMARK COMPLETE")
         logger.info(f"Results saved to: {self.output_dir}")
+        if self.enable_calibration:
+            logger.info("Calibration analysis included")
+        if self.enable_hardware_profiling:
+            logger.info("Hardware profiling included")
         logger.info("="*80)
         
         return results, summary_df
+    
+    def _generate_calibration_plots(self, results):
+        """Generate calibration-specific plots."""
+        logger.info("Generating calibration plots...")
+        
+        # Calibration metrics comparison
+        if 'Tejas' in results and 'calibration_map' in results['Tejas']:
+            tejas_results = results['Tejas']
+            
+            metrics = ['MAP', 'NDCG', 'Precision@5', 'Recall@5']
+            values = [
+                tejas_results.get('calibration_map', 0),
+                tejas_results.get('calibration_ndcg', 0),
+                tejas_results.get('calibration_precision_at_5', 0),
+                tejas_results.get('calibration_recall_at_5', 0),
+            ]
+            
+            plt.figure(figsize=(10, 6))
+            bars = plt.bar(metrics, values, color=['#2E86AB', '#A23B72', '#F18F01', '#C73E1D'])
+            
+            # Add value labels
+            for bar, val in zip(bars, values):
+                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{val:.3f}', ha='center', va='bottom', fontsize=12)
+            
+            plt.ylabel('Score', fontsize=14)
+            plt.title('Tejas Calibration Metrics', fontsize=16)
+            plt.ylim(0, 1.1)
+            plt.grid(axis='y', alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig(self.plots_dir / 'calibration_metrics.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info("Saved calibration metrics plot")
+        
+        # Throughput comparison
+        systems = []
+        throughputs = []
+        
+        for system in ['Tejas', 'Word2Vec', 'BERT']:
+            if system in results and 'throughput_comparisons_per_sec' in results[system]:
+                systems.append(system)
+                throughputs.append(results[system]['throughput_comparisons_per_sec'])
+        
+        if throughputs:
+            plt.figure(figsize=(8, 6))
+            bars = plt.bar(systems, throughputs, color=['#2E86AB', '#A23B72', '#F18F01'][:len(systems)])
+            
+            # Add value labels
+            for bar, throughput in zip(bars, throughputs):
+                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 10000,
+                        f'{throughput:.0f}', ha='center', va='bottom', fontsize=12)
+            
+            plt.ylabel('Comparisons per Second', fontsize=14)
+            plt.title('Search Throughput Comparison', fontsize=16)
+            plt.yscale('log')
+            plt.grid(axis='y', alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig(self.plots_dir / 'throughput_comparison.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info("Saved throughput comparison plot")
 
 
 def main():
@@ -834,6 +1175,13 @@ def main():
                        help="Output directory for results")
     parser.add_argument("--n-samples", type=int, default=10000,
                        help="Number of titles to use for testing")
+    parser.add_argument("--backend", default="auto",
+                       choices=["numpy", "numba", "native", "auto"],
+                       help="Backend for bit operations")
+    parser.add_argument("--no-calibration", action="store_true",
+                       help="Disable calibration analysis")
+    parser.add_argument("--no-hardware-profiling", action="store_true",
+                       help="Disable hardware profiling")
     
     args = parser.parse_args()
     
@@ -841,7 +1189,10 @@ def main():
     benchmark = BenchmarkSuite(
         data_dir=args.data_dir,
         model_dir=args.model_dir,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        backend=args.backend,
+        enable_calibration=not args.no_calibration,
+        enable_hardware_profiling=not args.no_hardware_profiling
     )
     
     # Run benchmarks
