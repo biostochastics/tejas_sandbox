@@ -1,0 +1,159 @@
+# Full Factorial Design for Detailed Analysis
+# Purpose: Complete analysis of 3-4 critical factors and their interactions
+# This design tests all combinations for comprehensive understanding
+
+design_type: full_factorial
+description: "Detailed analysis of critical TEJAS factors and their interactions"
+
+# Critical factors identified from screening
+factors:
+  # Factor 1: Pipeline architecture (most impactful)
+  pipeline_type:
+    levels: ["modular", "fused", "fused_v2"]
+    description: "Architecture has largest impact on performance"
+  
+  # Factor 2: SVD method
+  svd_method:
+    levels: ["truncated", "randomized", "randomized_downsampled"]
+    description: "Core algorithm for dimensionality reduction"
+  
+  # Factor 3: Bit configuration
+  n_bits:
+    levels: [128, 256, 512]
+    description: "Trade-off between accuracy and speed"
+  
+  # Factor 4: Optimization flags
+  use_simd:
+    levels: [true, false]
+    description: "SIMD acceleration impact"
+
+# Fixed settings for other factors
+fixed_factors:
+  bit_packing: true  # Always enabled based on screening
+  tokenizer: "char_ngram"  # Best performer
+  backend: "numpy"  # Most stable
+  use_numba: false  # Conflicts with other optimizations
+  use_itq: false  # Minimal benefit
+  use_reranker: false  # Not worth overhead
+  downsample_ratio: 1.0  # Use full data
+  energy_threshold: 0.95  # Standard setting
+
+# Comprehensive metrics collection
+metrics:
+  performance:
+    - encoding_speed
+    - search_latency_p50
+    - search_latency_p95
+    - search_latency_p99
+    - throughput_qps
+  
+  accuracy:
+    - ndcg_at_1
+    - ndcg_at_10
+    - ndcg_at_100
+    - mrr_at_10
+    - recall_at_10
+    - recall_at_100
+    - recall_at_1000
+  
+  resources:
+    - peak_memory_mb
+    - encoding_memory_mb
+    - index_size_mb
+    - cpu_utilization_percent
+    - cache_misses
+  
+  stability:
+    - variance_across_runs
+    - outlier_frequency
+    - failure_rate
+
+# Interaction analysis
+interactions:
+  analyze_2way: true  # All 2-way interactions
+  analyze_3way: true  # Selected 3-way interactions
+  interaction_plots: true
+  
+  # Specific interactions of interest
+  focus_interactions:
+    - ["pipeline_type", "svd_method"]
+    - ["n_bits", "use_simd"]
+    - ["pipeline_type", "n_bits"]
+
+# Experiment configuration
+experiment_config:
+  dataset: "wikipedia"
+  dataset_size: "250k"
+  n_queries: 5000  # More queries for statistical power
+  n_runs_per_config: 10  # Multiple runs for variance estimation
+  random_seed: 42
+  warm_up_runs: 2  # Discard first 2 runs for JIT warmup
+  
+  # Randomization
+  randomize_run_order: true
+  blocking_factor: "time_of_day"  # Account for system load variations
+
+# Statistical analysis
+statistics:
+  # ANOVA settings
+  anova_type: "three_way"
+  include_interactions: true
+  post_hoc_test: "tukey_hsd"
+  
+  # Effect size calculations
+  calculate_eta_squared: true
+  calculate_cohens_d: true
+  
+  # Model fitting
+  fit_regression_model: true
+  model_selection: "stepwise"
+  
+  # Confidence intervals
+  confidence_level: 0.95
+  bootstrap_samples: 1000
+
+# Visualization
+visualization:
+  # Main effects plots
+  main_effects_plot: true
+  
+  # Interaction plots
+  interaction_matrix: true
+  
+  # Performance profiles
+  performance_profiles: true
+  
+  # 3D surface plots for continuous responses
+  response_surfaces: true
+  
+  # Box plots for variance
+  box_plots_by_factor: true
+
+# Output configuration
+output:
+  # Raw data
+  save_raw_results: true
+  format: "parquet"  # Efficient storage
+  
+  # Summary statistics
+  generate_summary_table: true
+  
+  # Report generation
+  create_latex_report: true
+  create_html_dashboard: true
+  
+  # Model export
+  export_predictive_model: true
+  model_format: "pickle"
+
+# Resource management
+resources:
+  max_memory_gb: 32
+  max_cores: 16
+  use_memory_profiling: true
+  use_cpu_affinity: true
+  checkpoint_interval: 10
+
+# Total experiments: 3 * 3 * 3 * 2 = 54 unique configurations
+# Total runs: 54 * 10 = 540 benchmark runs
+# Estimated time: ~9 hours with parallelization

@@ -1,0 +1,143 @@
+# TEJAS vs BERT Head-to-Head Comparison
+# Simple recipe for comparing all TEJAS pipelines against BERT baselines
+# 5 TEJAS + 2 BERT = 7 pipelines × 3 datasets × 10 runs = 210 experiments
+
+comparison_name: "TEJAS vs BERT Statistical Comparison"
+description: "Direct comparison of all TEJAS architectures against BERT baselines with median and 95% confidence intervals"
+
+# Pipelines to compare (5 TEJAS + 2 BERT)
+pipelines:
+  # TEJAS variants
+  - name: "TEJAS-Original"
+    type: "original_tejas"
+    config:
+      n_bits: 256
+      batch_size: 1000
+      backend: "numpy"
+      svd_method: "truncated"
+      
+  - name: "TEJAS-GoldenRatio"
+    type: "goldenratio"
+    config:
+      n_bits: 256
+      batch_size: 1000
+      backend: "numpy"
+      svd_method: "randomized"
+      
+  - name: "TEJAS-FusedChar"
+    type: "fused_char"
+    config:
+      n_bits: 256
+      batch_size: 1000
+      backend: "numpy"
+      use_simd: true
+      
+  - name: "TEJAS-FusedByte"
+    type: "fused_byte"
+    config:
+      n_bits: 256
+      batch_size: 1000
+      backend: "numpy"
+      tokenizer: "byte_bpe"
+      
+  - name: "TEJAS-Optimized"
+    type: "optimized_fused"
+    config:
+      n_bits: 256
+      batch_size: 1000
+      backend: "numba"
+      use_numba: true
+      use_simd: true
+      
+  # BERT baselines
+  - name: "BERT-MiniLM"
+    type: "bert_mini"
+    config:
+      model_name: "all-MiniLM-L6-v2"
+      embedding_dim: 384
+      batch_size: 32
+      device: "cpu"
+      
+  - name: "BERT-MPNet"
+    type: "bert_base"
+    config:
+      model_name: "all-mpnet-base-v2"
+      embedding_dim: 768
+      batch_size: 32
+      device: "cpu"
+
+# Datasets to test on
+datasets:
+  - name: "wikipedia"
+    size: "125k"
+  - name: "msmarco"
+    size: "default"
+  - name: "beir"
+    subdataset: "scifact"
+
+# Benchmark configuration
+benchmark:
+  n_runs: 10  # 10 runs per configuration for statistical significance
+  random_seeds: [42, 123, 456, 789, 1001, 1337, 2024, 3141, 9999, 8888]
+  parallel_experiments: 4
+  timeout_seconds: 300
+  checkpoint_interval: 10
+  
+# Metrics to collect (focused set)
+metrics:
+  primary:
+    - encoding_speed       # Documents per second
+    - query_latency_p50    # Median query latency
+    - peak_memory_mb       # Peak memory usage
+    - ndcg_at_10          # Search accuracy
+    
+  secondary:
+    - query_latency_p95    # 95th percentile latency
+    - index_size_mb        # Index storage size
+    - mrr_at_10           # Mean reciprocal rank
+    - recall_at_100       # Recall for larger result sets
+
+# Statistical analysis configuration
+statistics:
+  # Use median and 95% confidence intervals
+  aggregation: "median"
+  confidence_level: 0.95
+  confidence_method: "percentile"  # Bootstrap percentile method
+  
+  # Statistical tests for significance
+  tests:
+    - mann_whitney_u      # Non-parametric test for medians
+    - kruskal_wallis      # Multi-group comparison
+    
+  # Visualization
+  plots:
+    - box_plots           # Show distribution of 10 runs
+    - bar_charts          # Median with error bars (95% CI)
+    - performance_profile # Relative performance across metrics
+
+# Output configuration
+output:
+  results_dir: "./benchmark_results/tejas_vs_bert"
+  
+  # Report format with median [95% CI]
+  report_format:
+    type: "comparison_table"
+    show_median: true
+    show_ci: true
+    show_raw_values: false
+    
+  # Table structure
+  # | Pipeline | Encoding Speed | Query Latency | Memory | Accuracy |
+  # Each cell: median [CI_lower, CI_upper]
+  
+  export_formats:
+    - json    # Raw data
+    - csv     # Table format
+    - html    # Interactive report
+    - latex   # For papers
+
+# Simplified execution
+execution:
+  mode: "comparison"  # Not full DOE, just head-to-head
+  skip_invalid: false  # All combinations are valid
+  error_handling: "continue"  # Continue on individual failures

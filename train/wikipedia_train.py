@@ -34,7 +34,15 @@ class WikipediaTrainer:
                  n_bits: int = 128,
                  max_features: int = 10000,
                  output_dir: str = "models/fingerprint_encoder",
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 threshold_strategy: str = 'zero',
+                 pack_bits: bool = False,
+                 bitorder: str = 'little',
+                 backend: str = 'auto',
+                 format_version: int = 2,
+                 use_randomized_svd: bool = False,
+                 svd_n_iter: int = 5,
+                 svd_n_oversamples: int = 20):
         """
         Initialize trainer.
         
@@ -49,6 +57,14 @@ class WikipediaTrainer:
             self.max_features = max_features
             self.output_dir = Path(output_dir)
             self.device = device
+            self.threshold_strategy = threshold_strategy
+            self.pack_bits = pack_bits
+            self.bitorder = bitorder
+            self.backend = backend
+            self.format_version = format_version
+            self.use_randomized_svd = use_randomized_svd
+            self.svd_n_iter = svd_n_iter
+            self.svd_n_oversamples = svd_n_oversamples
             
             # Create output directory
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +166,11 @@ class WikipediaTrainer:
             encoder = GoldenRatioEncoder(
                 n_bits=self.n_bits,
                 max_features=self.max_features,
-                device=self.device
+                device=self.device,
+                threshold_strategy=self.threshold_strategy,
+                use_randomized_svd=self.use_randomized_svd,
+                svd_n_oversamples=self.svd_n_oversamples,
+                svd_n_iter=self.svd_n_iter
             )
             
             # Train encoder with golden ratio sampling

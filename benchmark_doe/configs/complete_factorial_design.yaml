@@ -1,0 +1,205 @@
+# Complete Factorial Design for DOE Benchmark
+# Purpose: Comprehensive testing of all factor combinations across all datasets
+# This design ensures complete coverage of the experimental space
+
+design_type: complete_factorial
+description: "Full coverage DOE design testing all 13 factors across all datasets"
+
+# All 13 factors with their test levels
+factors:
+  # Binary factors (5 total)
+  bit_packing:
+    levels: [true, false]
+    description: "Pack bits into uint32 arrays"
+  
+  use_numba:
+    levels: [true, false]
+    description: "Enable Numba JIT compilation"
+  
+  use_itq:
+    levels: [true, false]
+    description: "Apply Iterative Quantization rotation"
+  
+  use_simd:
+    levels: [true, false]
+    description: "Use SIMD acceleration"
+  
+  use_reranker:
+    levels: [true, false]
+    description: "Apply reranking post-processing"
+  
+  # Categorical factors (5 total)
+  tokenizer:
+    levels: ["char_ngram", "byte_bpe", "word", "hybrid"]
+    description: "Tokenization method"
+  
+  svd_method:
+    levels: ["truncated", "randomized", "randomized_downsampled"]
+    description: "SVD computation method"
+  
+  backend:
+    levels: ["numpy", "pytorch", "numba"]
+    description: "Computational backend"
+  
+  pipeline_type:
+    levels: ["original_tejas", "goldenratio", "fused_char", "fused_byte", "optimized_fused"]
+    description: "Pipeline architecture"
+  
+  itq_variant:
+    levels: ["none", "standard", "optimized", "similarity_preserving"]
+    description: "ITQ implementation variant"
+  
+  # Ordinal factor (1 total)
+  n_bits:
+    levels: [64, 128, 256, 512]
+    description: "Number of binary bits per document"
+  
+  # Continuous factors (2 total, discretized to 3 levels each)
+  downsample_ratio:
+    levels: [0.1, 0.5, 1.0]
+    description: "Fraction of data for SVD"
+  
+  energy_threshold:
+    levels: [0.80, 0.90, 0.99]
+    description: "Variance preservation in SVD"
+
+# Datasets to test
+datasets:
+  - name: "wikipedia"
+    sizes: ["125k", "250k"]
+  - name: "msmarco"
+    sizes: ["default"]
+  - name: "beir"
+    subdatasets: ["scifact", "nfcorpus"]
+  - name: "internal_dense"
+    sizes: ["small", "medium"]
+  - name: "internal_sparse"
+    sizes: ["small", "medium"]
+
+# Experiment configuration
+experiment_config:
+  n_runs_per_config: 5  # Run each configuration 5 times
+  random_seeds: [42, 123, 456, 789, 1001]  # Different seed for each run
+  parallel_experiments: 4
+  timeout_seconds: 300  # 5 minutes per experiment
+  checkpoint_interval: 10
+  
+# Metrics to collect (comprehensive)
+metrics:
+  performance:
+    - encoding_speed       # docs/second
+    - search_latency_p50   # milliseconds
+    - search_latency_p95
+    - search_latency_p99
+    - throughput_qps       # queries/second
+    - indexing_time        # seconds
+  
+  accuracy:
+    - ndcg_at_1
+    - ndcg_at_10
+    - ndcg_at_100
+    - mrr_at_10
+    - recall_at_10
+    - recall_at_100
+    - recall_at_1000
+    - precision_at_10
+    - map_at_100
+  
+  resources:
+    - peak_memory_mb
+    - encoding_memory_mb
+    - index_size_mb
+    - cpu_utilization_percent
+    - cache_misses
+    - page_faults
+  
+  stability:
+    - variance_across_runs
+    - outlier_frequency
+    - failure_rate
+    - convergence_time
+
+# Analysis configuration
+analysis:
+  # Main effects analysis
+  main_effects: true
+  
+  # Interaction effects (2-way and 3-way)
+  interactions:
+    analyze_2way: true
+    analyze_3way: false  # Too many combinations for full 3-way
+    key_interactions:
+      - ["pipeline_type", "svd_method"]
+      - ["n_bits", "use_simd"]
+      - ["tokenizer", "pipeline_type"]
+      - ["backend", "use_numba"]
+      - ["downsample_ratio", "svd_method"]
+  
+  # Statistical tests
+  statistics:
+    anova: true
+    tukey_hsd: true
+    effect_size: true
+    confidence_level: 0.95
+    multiple_testing_correction: "bonferroni"
+  
+  # Visualization
+  visualization:
+    pareto_plots: true
+    interaction_plots: true
+    box_plots: true
+    heatmaps: true
+    response_surfaces: true
+
+# Optimization goals
+optimization:
+  objectives:
+    - metric: "encoding_speed"
+      target: "maximize"
+      weight: 0.3
+    - metric: "ndcg_at_10"
+      target: "maximize"
+      weight: 0.4
+    - metric: "peak_memory_mb"
+      target: "minimize"
+      weight: 0.2
+    - metric: "search_latency_p95"
+      target: "minimize"
+      weight: 0.1
+  
+  constraints:
+    - "peak_memory_mb <= 8192"
+    - "search_latency_p95 <= 50"
+    - "ndcg_at_10 >= 0.7"
+    - "failure_rate <= 0.01"
+
+# Output configuration
+output:
+  results_dir: "./benchmark_results/complete_factorial"
+  save_raw_data: true
+  save_processed_data: true
+  generate_report: true
+  report_formats: ["html", "pdf", "csv"]
+  
+  # What to include in report
+  report_sections:
+    - executive_summary
+    - factor_analysis
+    - main_effects
+    - interaction_effects
+    - optimal_configurations
+    - dataset_comparison
+    - pipeline_comparison
+    - statistical_analysis
+    - recommendations
+
+# Resource management
+resources:
+  max_memory_gb: 32
+  max_cores: 16
+  use_gpu: false
+  disk_space_gb: 100
+  
+# Estimated totals:
+# Factors: 2^5 * 4 * 3 * 3 * 5 * 4 * 4 * 3 * 3 = way too many for full factorial!
+# Using fractional factorial design instead for practical execution

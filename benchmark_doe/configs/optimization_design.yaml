@@ -1,0 +1,109 @@
+# Central Composite Design (CCD) for Optimization
+# Purpose: Find optimal settings for continuous factors after screening
+# This design includes center points and axial points for quadratic effects
+
+design_type: central_composite
+description: "Response surface methodology to optimize TEJAS performance"
+
+# Factors for optimization (continuous and key discrete)
+# Based on screening results, these are the most impactful factors
+factors:
+  # Continuous factors with 5 levels (center, factorial, axial)
+  downsample_ratio:
+    type: continuous
+    range: [0.1, 1.0]
+    center: 0.5
+    description: "Fraction of data for SVD computation"
+  
+  energy_threshold:
+    type: continuous
+    range: [0.80, 0.99]
+    center: 0.90
+    description: "Variance preservation in SVD"
+  
+  # Key ordinal factor with multiple levels
+  n_bits:
+    type: ordinal
+    levels: [64, 128, 256, 384, 512]
+    center: 256
+    description: "Binary signature length"
+  
+  # Fixed optimal settings from screening
+  fixed_factors:
+    bit_packing: true
+    use_simd: true
+    svd_method: "randomized"
+    pipeline_type: "fused_v2"
+    tokenizer: "char_ngram"
+    backend: "numpy"
+    use_itq: false  # Based on screening results
+    use_reranker: false
+
+# Response variables to optimize
+responses:
+  # Primary objective: Maximize
+  encoding_throughput:
+    target: "maximize"
+    weight: 0.4
+    units: "docs/second"
+  
+  # Secondary objectives
+  search_accuracy:
+    metric: "ndcg_at_10"
+    target: "maximize"
+    weight: 0.3
+    minimum_acceptable: 0.75
+  
+  query_latency:
+    metric: "search_latency_p95"
+    target: "minimize"
+    weight: 0.2
+    maximum_acceptable: 10.0  # ms
+  
+  memory_usage:
+    metric: "peak_memory_mb"
+    target: "minimize"
+    weight: 0.1
+    maximum_acceptable: 4096  # MB
+
+# CCD specific parameters
+design_parameters:
+  alpha: 1.414  # Axial point distance (rotatable design)
+  center_runs: 6  # Number of center point replicates
+  face_centered: false  # Use star points outside cube
+  
+# Experiment configuration
+experiment_config:
+  dataset: "wikipedia"
+  dataset_size: "250k"
+  n_queries: 2000
+  n_runs_per_config: 5  # More runs for optimization
+  random_seed: 42
+  parallel_experiments: 4
+  
+# Optimization settings
+optimization:
+  model_type: "quadratic"  # Include interaction and quadratic terms
+  optimizer: "L-BFGS-B"
+  convergence_tolerance: 0.001
+  max_iterations: 100
+  
+  # Constraints
+  constraints:
+    - "memory_usage <= 4096"
+    - "query_latency <= 10.0"
+    - "search_accuracy >= 0.75"
+  
+# Analysis outputs
+analysis:
+  generate_response_surfaces: true
+  contour_plots: true
+  optimal_point_validation: true
+  sensitivity_analysis: true
+  
+# Resource allocation
+resources:
+  max_memory_gb: 32
+  max_cores: 16
+  gpu_available: false
+  checkpoint_interval: 5

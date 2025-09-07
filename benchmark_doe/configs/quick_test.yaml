@@ -1,0 +1,65 @@
+# Quick Test Configuration
+# Purpose: Rapid validation that all pipelines work correctly
+# Minimal runs for fast feedback
+
+design_type: custom
+description: "Quick validation of all 5 pipeline types"
+
+# Test each pipeline with minimal configuration
+experiments:
+  - name: "test_original_tejas"
+    pipeline: "original_tejas"
+    n_bits: 256
+    dataset: "wikipedia"
+    dataset_size: "10k"
+    n_queries: 100
+    
+  - name: "test_goldenratio"
+    pipeline: "goldenratio"
+    n_bits: 256
+    dataset: "wikipedia"
+    dataset_size: "10k"
+    n_queries: 100
+    
+  - name: "test_fused_char"
+    pipeline: "fused_char"
+    n_bits: 256
+    tokenizer: "char_ngram"
+    dataset: "wikipedia"
+    dataset_size: "10k"
+    n_queries: 100
+    
+  - name: "test_fused_byte"
+    pipeline: "fused_byte"
+    n_bits: 256
+    tokenizer: "byte_bpe"
+    dataset: "wikipedia"
+    dataset_size: "10k"
+    n_queries: 100
+    
+  - name: "test_optimized_fused"
+    pipeline: "optimized_fused"
+    n_bits: 256
+    use_simd: true
+    use_numba: true
+    dataset: "wikipedia"
+    dataset_size: "10k"
+    n_queries: 100
+
+# Common settings
+common_config:
+  n_runs: 2
+  random_seed: 42
+  timeout_seconds: 60
+  save_results: true
+  
+# Validation criteria
+validation:
+  check_all_complete: true
+  check_no_errors: true
+  check_metrics_present: true
+  min_encoding_speed: 100  # docs/sec
+  max_latency_ms: 100
+  min_accuracy: 0.5  # Lower bar for quick test
+
+# Expected runtime: ~5 minutes
