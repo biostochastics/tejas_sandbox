@@ -1,0 +1,27 @@
+{
+  "fit_time": 3.33995558321476e-07,
+  "encode_time": 0.0006219170172698796,
+  "query_time": 0.00025412498507648706,
+  "total_time": 0.0008763759979046881,
+  "docs_per_second": 160793.15603709428,
+  "encoding_speed": 160793.15603709428,
+  "queries_per_second": 39350.71554255155,
+  "avg_query_latency_ms": 0.02472499618306756,
+  "search_latency_p50": 0.019041995983570814,
+  "query_latency_p50": 0.019041995983570814,
+  "search_latency_p95": 0.05078110843896862,
+  "query_latency_p95": 0.05078110843896862,
+  "index_size_mb": 0.0244140625,
+  "peak_memory_mb": 0.234375,
+  "ndcg_at_10": 0.33179344126179766,
+  "map_at_10": 0.5018849206349206,
+  "mrr_at_10": 0.6291666666666667,
+  "recall_at_100": 1.0,
+  "n_documents": 100,
+  "n_queries": 10,
+  "valid_queries": 10,
+  "code_shape": [
+    100,
+    256
+  ]
+}

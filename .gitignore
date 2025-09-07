@@ -40,8 +40,42 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # Package files
 *.tar.gz
 *.zip
+
+# Benchmarks
+benchmark/
+benchmarks_*/
+benchmark_*.py
+benchmark_*.json
+*_benchmark.py
+benchmark_results/
+results/
+vignette_*.py
+vignette_*.json
+
+# Documentation and guides
+BENCHMARKING_GUIDE.md
+OPTIMIZATION_GUIDE.md
+TEJAS_ARCHITECTURE.md
+README_old.md
+
+# Test files
+test_*.py
+run_tests.py
+tests/README.md
+
+# Example and demo files
+examples/
+demo_*.py
+
+# Original/backup directories
+original_tejas/
+
+# Dataset directories
+tejas_datasets/
+datasets/

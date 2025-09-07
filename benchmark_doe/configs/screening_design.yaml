@@ -1,0 +1,84 @@
+# Plackett-Burman Screening Design
+# Purpose: Identify the most impactful factors with minimal runs
+# This design tests main effects only, not interactions
+
+design_type: plackett_burman
+description: "Screening design to identify critical factors affecting TEJAS performance"
+
+# Factors to screen (2-level for Plackett-Burman)
+factors:
+  # Binary factors
+  bit_packing:
+    levels: [true, false]
+    description: "Pack bits into uint32 arrays"
+  
+  use_numba:
+    levels: [true, false]
+    description: "Enable Numba JIT compilation"
+  
+  use_itq:
+    levels: [true, false]
+    description: "Apply Iterative Quantization rotation"
+  
+  use_simd:
+    levels: [true, false]
+    description: "Use SIMD acceleration for Hamming distance"
+  
+  use_reranker:
+    levels: [true, false]
+    description: "Apply reranking post-processing"
+  
+  # Categorical factors (use extremes for screening)
+  tokenizer:
+    levels: ["char_ngram", "byte_bpe"]
+    description: "Tokenization method"
+  
+  svd_method:
+    levels: ["truncated", "randomized"]
+    description: "SVD computation method"
+  
+  backend:
+    levels: ["numpy", "numba"]
+    description: "Computational backend"
+  
+  pipeline_type:
+    levels: ["modular", "fused_v2"]
+    description: "Pipeline architecture"
+  
+  # Ordinal factors (use min/max for screening)
+  n_bits:
+    levels: [128, 512]
+    description: "Number of binary bits per document"
+
+# Metrics to collect
+metrics:
+  primary:
+    - encoding_speed  # docs/second
+    - search_latency_p50  # milliseconds
+    - ndcg_at_10  # accuracy
+  
+  secondary:
+    - peak_memory_mb
+    - index_size_mb
+    - recall_at_100
+
+# Experiment parameters
+experiment_config:
+  dataset: "wikipedia"
+  dataset_size: "125k"
+  n_queries: 1000
+  n_runs_per_config: 3
+  random_seed: 42
+  timeout_seconds: 300
+  
+# Analysis settings
+analysis:
+  significance_level: 0.05
+  effect_threshold: 0.1  # Minimum effect size to consider significant
+  output_format: "pareto_plot"  # Visualize factor importance
+  
+# Resource constraints
+resources:
+  max_memory_gb: 16
+  max_cores: 8
+  checkpoint_interval: 10  # Save every 10 experiments
